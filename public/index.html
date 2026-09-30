@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -111,6 +111,14 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
 [hidden] { display: none !important; }
 @media (prefers-reduced-motion: reduce) { .stage.shake { animation: none; } }
 
+/* Default viewport presentation; controls remain available below the stage. */
+.theater { margin: 0; padding: 0; }
+.theater .wrap { max-width: none; }
+.theater .cinema { height: 100vh; height: 100svh; display: flex; align-items: center; justify-content: center; }
+.theater .stage { width: min(100%, 177.78vh); width: min(100%, calc(100svh * 16 / 9)); flex: none; border: 0; }
+.theater .controls, .theater .chapters, .theater .note { margin-inline: 16px; }
+.theater .note { margin-bottom: 32px; }
+
 /* fullscreen: letterbox the 16:9 stage */
 .stage:fullscreen { width: min(100vw, 177.78vh); height: auto; margin: auto; border: 0; }
 .stage::backdrop { background: var(--ink); }
@@ -118,6 +126,7 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
 /* phones: stack chat above the viewport */
 @media (max-width: 720px) {
   .stage { aspect-ratio: 3 / 4; grid-template-columns: 1fr; grid-template-rows: 44% 1fr; }
+  .theater .stage, .stage:fullscreen { width: min(100%, 75vh); width: min(100%, calc(100svh * .75)); }
   .chat { font-size: 3.1cqw; border-right: 0; border-bottom: 1px solid var(--line); }
   .overlay { inset: 44% 0 0 0; }
   .overlay span { font-size: 7cqw; }
@@ -130,9 +139,10 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
 }
 </style>
 </head>
-<body>
+<body class="theater">
 
 <div class="wrap">
+  <div class="cinema">
   <div class="stage" id="stage">
     <section class="chat" aria-label="對話視窗">
       <header><span class="dot"></span><b>claude</b><span>~/world · execute(me)</span></header>
@@ -143,23 +153,25 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
     <section class="view" id="view" aria-label="世界視窗"><pre id="screen"></pre><div class="subs" aria-live="off"><p class="a" id="subA"></p><p class="b" id="subB"></p></div></section>
     <div class="overlay" id="overlay"></div>
     <div class="scan"></div>
-    <button class="poster" id="poster" aria-label="播放"><div><b>Claude.execute(me)</b><em>▶ 播放 · space</em></div></button>
+    <button class="poster" id="poster" aria-label="播放"><div><b>Claude.execute(me)</b><em>▶ 播放并全屏 · 空格键</em></div></button>
+  </div>
+
   </div>
 
   <div class="controls">
     <button id="play">▶ 播放</button>
     <span class="time" id="time">000.0 / 210s</span>
-    <input class="seek" id="seek" type="range" min="0" max="210" step="0.1" value="62" aria-label="時間軸">
-    <button id="fs">全螢幕</button>
-    <label class="btn" for="audioFile">載入音檔／歌詞<input id="audioFile" type="file" accept="audio/*,.lrc" multiple hidden></label>
-    <span id="audioName">未載入 · 可把音檔和 .lrc 一起拖進畫面</span>
+    <input class="seek" id="seek" type="range" min="0" max="210" step="0.1" value="0" aria-label="时间轴">
+    <button id="fs">退出全屏</button>
+    <label class="btn" for="audioFile">载入音频／歌词<input id="audioFile" type="file" accept="audio/*,.lrc" multiple hidden></label>
+    <span id="audioName">未载入 · 可把音频和 .lrc 一起拖进画面</span>
     <label>BPM <input class="bpm" id="bpm" type="number" min="60" max="240" value="130"></label>
   </div>
   <div class="chapters" id="chapters"></div>
   <p class="note">
-    <b>非官方同人作品。</b>靈感來自 Mili《world.execute(me);》以及兩個開源 PV 專案。這裡不含原曲音訊和原歌詞，畫面裡的對話與文字全部是另外寫的原創內容。原曲請到 Mili 的官方管道收聽和購買。
-    想配樂的話，請用「載入音檔／歌詞」選你合法持有的音檔和 .lrc 歌詞檔（支援雙語 LRC），或直接一起拖進畫面。檔案只在你的瀏覽器裡讀取，不會上傳。畫面由時間 t 逐幀算出，節拍脈衝可用 BPM 調整。
-    鍵盤：空白鍵播放／暫停，← → 快轉 5 秒。<a href="https://github.com/Sakimu99/claude-execute-me">原始碼</a>
+    <b>非官方同人作品。</b>灵感来自 Mili《world.execute(me);》以及两个开源 PV 项目。动画中的对话与文字为原创内容。歌曲及原歌词的版权归各自权利人所有；本项目的 MIT 许可不涵盖这些媒体内容。原曲请通过 Mili 的官方渠道收听和购买。
+    页面默认加载 song.mp3 和 lrc.lrc，铺满窗口并尝试自动播放。若浏览器限制自动播放，请点击画面开始有声播放并进入全屏。你也可以用“载入音频／歌词”选择本地文件（支持双语 LRC），或将文件一起拖进画面。本地选择的文件仅在浏览器内读取，不会上传。节拍脉冲可用 BPM 调整。
+    键盘：空格键播放／暂停，← → 后退／前进 5 秒，Esc 退出浏览器全屏。<a href="https://github.com/Sakimu99/claude-execute-me">源代码</a>
   </p>
 </div>
 
@@ -252,9 +264,9 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
   ];
 
   const CHAPTERS = [
-    ['boot', 0], ['execute', 16], ['geometry', 29.71], ['overclock', 44.45], ['render', 59.22], ['still life', 74.04],
-    ['switches', 88.59], ['left', 103.49], ['cleanup', 118.33], ['recursion', 131.22], ['execute ×12', 147.66],
-    ['retry', 162.63], ['heart', 177.25], ['outro', 191.4], ['credits', 209.5],
+    ['启动', 0], ['执行', 16], ['几何', 29.71], ['超频', 44.45], ['渲染', 59.22], ['静物', 74.04],
+    ['开关', 88.59], ['离开', 103.49], ['清理', 118.33], ['递归', 131.22], ['执行 ×12', 147.66],
+    ['重试', 162.63], ['心形', 177.25], ['尾声', 191.4], ['片尾', 209.5],
   ];
 
   // context usage over time, 0–100
@@ -990,35 +1002,64 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
 
   // ───────── clock & controls ─────────
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const audio = new Audio();
-  let hasAudio = false, playing = false, offset = 62, t0 = 0;
+  const audio = new Audio('song.mp3');
+  audio.preload = 'auto';
+  let hasAudio = true, playing = false, hasStarted = false, offset = 0, t0 = 0, playAttempt = 0;
   const now = () => hasAudio ? audio.currentTime : playing ? offset + (performance.now() - t0) / 1000 : offset;
 
-  function setPlaying(p) {
-    playing = p;
-    if (p) {
-      if (now() >= duration - .05) seek(0);
-      t0 = performance.now();
-      if (hasAudio) audio.play().catch(() => {});
-    } else {
-      offset = now();
-      if (hasAudio) audio.pause();
+  function updatePlaybackUI() {
+    $('play').textContent = playing ? '❚❚ 暂停' : '▶ 播放';
+    $('poster').hidden = playing || hasStarted;
+  }
+  async function setPlaying(p) {
+    const attempt = ++playAttempt;
+    if (!p) {
+      offset = now(); playing = false; audio.pause(); updatePlaybackUI(); return;
     }
-    $('play').textContent = p ? '❚❚ 暫停' : '▶ 播放';
-    $('poster').hidden = true;
+    if (now() >= duration - .05) seek(0);
+    t0 = performance.now();
+    if (hasAudio) {
+      try { await audio.play(); }
+      catch { if (attempt === playAttempt) { playing = false; updatePlaybackUI(); } return; }
+    }
+    if (attempt !== playAttempt) return;
+    playing = true; hasStarted = true; updatePlaybackUI();
   }
   function seek(x) {
     offset = clamp(x, 0, duration); t0 = performance.now();
     if (hasAudio) audio.currentTime = offset;
   }
-
-  $('play').onclick = () => setPlaying(!playing);
-  $('poster').onclick = () => { seek(0); setPlaying(true); };
+  function enterFullscreen() {
+    document.body.classList.add('theater');
+    if (!document.fullscreenElement) $('stage').requestFullscreen?.().catch(() => {});
+  }
+  function startFromGesture() {
+    setPlaying(true); enterFullscreen();
+  }
+  $('play').onclick = () => playing ? setPlaying(false) : startFromGesture();
+  $('poster').onclick = startFromGesture;
   $('seek').oninput = e => seek(+e.target.value);
-  $('fs').onclick = () => { const s = $('stage'); (document.fullscreenElement ? document.exitFullscreen() : s.requestFullscreen?.())?.catch?.(() => {}); };
+  const updateFullscreenUI = () => {
+    $('fs').textContent = document.fullscreenElement || document.body.classList.contains('theater') ? '退出全屏' : '全屏';
+  };
+  $('fs').onclick = () => {
+    if (document.fullscreenElement || document.body.classList.contains('theater')) {
+      document.body.classList.remove('theater');
+      document.exitFullscreen?.().catch(() => {});
+    } else enterFullscreen();
+    updateFullscreenUI();
+  };
+  document.addEventListener('fullscreenchange', updateFullscreenUI);
+  audio.onloadedmetadata = () => {
+    duration = Math.max(DURATION, audio.duration || 0); $('seek').max = duration.toFixed(1);
+  };
+  audio.addEventListener('error', () => {
+    offset = audio.currentTime || offset; hasAudio = false;
+    setPlaying(false); loaded.audio = '音频加载失败，可载入本地文件'; showLoaded();
+  });
   // ───────── viewer's own media: audio + .lrc, read locally, never uploaded ─────────
-  const loaded = { audio: '', lrc: '' };
-  const showLoaded = () => { $('audioName').textContent = [loaded.audio, loaded.lrc].filter(Boolean).join(' + ') || '未載入 · 可把音檔和 .lrc 一起拖進畫面'; };
+  const loaded = { audio: 'song.mp3', lrc: '' };
+  const showLoaded = () => { $('audioName').textContent = [loaded.audio, loaded.lrc].filter(Boolean).join(' + ') || '未载入 · 可把音频和 .lrc 一起拖进画面'; };
 
   function loadAudio(blob, name) {
     const was = playing; if (was) setPlaying(false);
@@ -1090,16 +1131,24 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
   stageEl.addEventListener('dragleave', () => stageEl.classList.remove('drop'));
   stageEl.addEventListener('drop', e => { e.preventDefault(); stageEl.classList.remove('drop'); loadFiles(e.dataTransfer.files); });
 
-  // local playback only: `tools/play-local.sh` serves media/ next to the page on 127.0.0.1
-  if (['localhost', '127.0.0.1'].includes(location.hostname)) {
-    fetch('media/song.mp3').then(r => r.ok && r.blob()).then(b => b && loadAudio(b, 'song.mp3')).catch(() => {});
-    fetch('media/lyrics.lrc').then(r => r.ok && r.blob()).then(b => b && loadLrc(b, 'lyrics.lrc')).catch(() => {});
+  // Default media is shipped with the page on every host.
+  showLoaded();
+  async function loadDefaults() {
+    try {
+      const response = await fetch('lrc.lrc');
+      if (!response.ok) throw new Error('Lyrics unavailable');
+      const blob = await response.blob();
+      if (!loaded.lrc) await loadLrc(blob, 'lrc.lrc');
+    } catch {
+      if (!loaded.lrc) { loaded.lrc = '歌词加载失败，可载入本地文件'; showLoaded(); }
+    }
+    if (!playing && playAttempt === 0) setPlaying(true);
   }
   audio.onended = () => { if (playing) setPlaying(false); };
   addEventListener('keydown', e => {
     // let focused controls keep their native keys, so nothing fires twice
     const tgt = e.target;
-    if (e.code === 'Space' && !tgt.closest('button, label, input[type=number]')) { e.preventDefault(); setPlaying(!playing); }
+    if (e.code === 'Space' && !tgt.closest('button, label, input[type=number]')) { e.preventDefault(); playing ? setPlaying(false) : startFromGesture(); }
     else if (tgt.tagName === 'INPUT') return;
     else if (e.code === 'ArrowRight') seek(now() + 5);
     else if (e.code === 'ArrowLeft') seek(now() - 5);
@@ -1149,6 +1198,7 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
     chapBtns.forEach((b, i) => b.classList.toggle('on', t >= CHAPTERS[i][1] && (i === CHAPTERS.length - 1 || t < CHAPTERS[i + 1][1])));
   }
   requestAnimationFrame(tick);
+  loadDefaults();
 })();
 </script>
 </body>

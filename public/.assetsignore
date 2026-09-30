@@ -1,3 +1,5 @@
 media/
 *.mp3
 *.lrc
+!song.mp3
+!lrc.lrc

@@ -13,10 +13,10 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 serve="${TMPDIR:-/tmp}/claude-execute-me-local"
 
 rm -rf "$serve"
-mkdir -p "$serve/media"
+mkdir -p "$serve"
 ln -s "$root/public/index.html" "$serve/index.html"
-ln -s "$(cd "$(dirname "$song")" && pwd)/$(basename "$song")" "$serve/media/song.mp3"
-[ -n "$lrc" ] && ln -s "$(cd "$(dirname "$lrc")" && pwd)/$(basename "$lrc")" "$serve/media/lyrics.lrc"
+ln -s "$(cd "$(dirname "$song")" && pwd)/$(basename "$song")" "$serve/song.mp3"
+[ -n "$lrc" ] && ln -s "$(cd "$(dirname "$lrc")" && pwd)/$(basename "$lrc")" "$serve/lrc.lrc"
 
 url="http://127.0.0.1:$port/"
 echo "▶ $url  (Ctrl+C to stop)"

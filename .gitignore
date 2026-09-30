@@ -12,3 +12,5 @@
 !.env.example
 media/
 *.lrc
+!public/song.mp3
+!public/lrc.lrc
