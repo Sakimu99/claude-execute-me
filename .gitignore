@@ -5,3 +5,8 @@
 *.m4a
 *.ogg
 .wrangler/
+
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example

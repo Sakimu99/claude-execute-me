@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "claude-execute-me",
+  "compatibility_date": "2026-09-26",
+  "assets": {
+    "directory": "./public"
+  },
+  "routes": [
+    { "pattern": "execute.megami.im", "custom_domain": true }
+  ]
+}
