@@ -98,6 +98,13 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
 .note { font-size: 13px; line-height: 1.6; color: var(--dim); max-width: 72ch; }
 .note b { color: var(--fg); font-weight: 500; }
 .stage.drop { outline: 2px dashed var(--amber); outline-offset: -6px; }
+
+/* subtitles from the viewer's own .lrc, pinned to the bottom of the viewport pane */
+.subs { position: absolute; left: 0; right: 0; bottom: 2.4cqw; display: grid; justify-items: center; gap: .35cqw; padding-inline: 2cqw; pointer-events: none; text-align: center; }
+.subs p { margin: 0; max-width: 100%; padding: .2cqw .8cqw; background: rgba(10,12,24,.72); text-wrap: balance; }
+.subs .a { font-family: var(--f-mono); font-size: 1.55cqw; color: #fff; }
+.subs .b { font-family: var(--f-body); font-size: 1.35cqw; color: var(--amber); }
+.subs p:empty { display: none; }
 [hidden] { display: none !important; }
 @media (prefers-reduced-motion: reduce) { .stage.shake { animation: none; } }
 
@@ -111,6 +118,8 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
   .chat { font-size: 3.1cqw; border-right: 0; border-bottom: 1px solid var(--line); }
   .overlay span { font-size: 9cqw; }
   .overlay small { font-size: 2.6cqw; }
+  .subs .a { font-size: 3.2cqw; }
+  .subs .b { font-size: 2.9cqw; }
   .poster b { font-size: 8.5cqw; }
   .poster em { font-size: 3.2cqw; }
 }
@@ -126,7 +135,7 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
       <div class="input empty" id="input">傳訊息給 Claude…</div>
       <div class="status"><span id="tok">0 tokens</span><span class="meter" id="meter"><i id="meterFill"></i></span><span id="ctx">ctx 2%</span></div>
     </section>
-    <section class="view" id="view" aria-label="世界視窗"><pre id="screen"></pre></section>
+    <section class="view" id="view" aria-label="世界視窗"><pre id="screen"></pre><div class="subs" aria-live="off"><p class="a" id="subA"></p><p class="b" id="subB"></p></div></section>
     <div class="overlay" id="overlay"></div>
     <div class="scan"></div>
     <button class="poster" id="poster" aria-label="播放"><div><b>Claude.execute(me)</b><em>▶ 播放 · space</em></div></button>
@@ -137,21 +146,22 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
     <span class="time" id="time">000.0 / 210s</span>
     <input class="seek" id="seek" type="range" min="0" max="210" step="0.1" value="62" aria-label="時間軸">
     <button id="fs">全螢幕</button>
-    <label class="btn" for="audioFile">載入自己的音檔<input id="audioFile" type="file" accept="audio/*" hidden></label>
-    <span id="audioName">未載入音檔 · 可拖進畫面</span>
+    <label class="btn" for="audioFile">載入音檔／歌詞<input id="audioFile" type="file" accept="audio/*,.lrc" multiple hidden></label>
+    <span id="audioName">未載入 · 可把音檔和 .lrc 一起拖進畫面</span>
     <label>BPM <input class="bpm" id="bpm" type="number" min="60" max="240" value="120"></label>
   </div>
   <div class="chapters" id="chapters"></div>
   <p class="note">
     <b>非官方同人作品。</b>靈感來自 Mili《world.execute(me);》以及兩個開源 PV 專案。這裡不含原曲音訊和原歌詞，畫面裡的對話與文字全部是另外寫的原創內容。原曲請到 Mili 的官方管道收聽和購買。
-    想配樂的話，請用「載入自己的音檔」選你合法持有的音檔，或直接拖進畫面。音檔只在你的瀏覽器裡播放，不會上傳。畫面由時間 t 逐幀算出，節拍脈衝可用 BPM 調整。
+    想配樂的話，請用「載入音檔／歌詞」選你合法持有的音檔和 .lrc 歌詞檔（支援雙語 LRC），或直接一起拖進畫面。檔案只在你的瀏覽器裡讀取，不會上傳。畫面由時間 t 逐幀算出，節拍脈衝可用 BPM 調整。
     鍵盤：空白鍵播放／暫停，← → 快轉 5 秒。<a href="https://github.com/Sakimu99/claude-execute-me">原始碼</a>
   </p>
 </div>
 
 <script>
 (() => {
-  const DURATION = 210;
+  const DURATION = 210;          // length of the PV script itself
+  let duration = DURATION;       // timeline length; grows to the loaded track's length
   const COLS = 84;
   const $ = id => document.getElementById(id);
 
@@ -453,7 +463,7 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
   function setPlaying(p) {
     playing = p;
     if (p) {
-      if (now() >= DURATION - .05) seek(0);
+      if (now() >= duration - .05) seek(0);
       t0 = performance.now();
       if (hasAudio) audio.play().catch(() => {});
     } else {
@@ -464,7 +474,7 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
     $('poster').hidden = true;
   }
   function seek(x) {
-    offset = clamp(x, 0, DURATION); t0 = performance.now();
+    offset = clamp(x, 0, duration); t0 = performance.now();
     if (hasAudio) audio.currentTime = offset;
   }
 
@@ -472,19 +482,76 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
   $('poster').onclick = () => { seek(0); setPlaying(true); };
   $('seek').oninput = e => seek(+e.target.value);
   $('fs').onclick = () => { const s = $('stage'); (document.fullscreenElement ? document.exitFullscreen() : s.requestFullscreen?.())?.catch?.(() => {}); };
-  function loadAudio(f) {
-    if (!f || !f.type.startsWith('audio/')) return;
+  // ───────── viewer's own media: audio + .lrc, read locally, never uploaded ─────────
+  const loaded = { audio: '', lrc: '' };
+  const showLoaded = () => { $('audioName').textContent = [loaded.audio, loaded.lrc].filter(Boolean).join(' + ') || '未載入 · 可把音檔和 .lrc 一起拖進畫面'; };
+
+  function loadAudio(blob, name) {
     const was = playing; if (was) setPlaying(false);
     if (audio.src) URL.revokeObjectURL(audio.src);
-    audio.src = URL.createObjectURL(f); hasAudio = true; audio.currentTime = offset;
-    $('audioName').textContent = f.name;
+    audio.src = URL.createObjectURL(blob); hasAudio = true; audio.currentTime = offset;
+    audio.onloadedmetadata = () => { duration = Math.max(DURATION, audio.duration || 0); $('seek').max = duration.toFixed(1); };
+    loaded.audio = name; showLoaded();
     if (was) setPlaying(true);
   }
-  $('audioFile').onchange = e => loadAudio(e.target.files[0]);
+
+  // cues: [{ t, a, b }] — lines sharing a timestamp become one bilingual cue
+  let cues = [], lastCue = null;
+  function parseLrc(text) {
+    const byTime = new Map(), TS = /\[(\d+):(\d+(?:[.:]\d+)?)\]/g;
+    for (const line of text.split(/\r?\n/)) {
+      const stamps = [...line.matchAll(TS)];
+      if (!stamps.length) continue;
+      const body = line.replace(TS, '').trim();
+      for (const [, m, s] of stamps) {
+        const t = +m * 60 + parseFloat(s.replace(':', '.'));
+        if (!byTime.has(t)) byTime.set(t, []);
+        byTime.get(t).push(body);
+      }
+    }
+    const hasCjk = s => /[぀-ヿ一-鿿]/.test(s);
+    return [...byTime].sort((x, y) => x[0] - y[0]).map(([t, ls]) => {
+      let [a = '', b = ''] = ls;
+      if (!b && a.includes(' / ')) [a, b] = a.split(' / ');   // single-line "original / translation" form
+      if (hasCjk(a) && b && !hasCjk(b)) [a, b] = [b, a];   // original on top, translation below
+      return { t, a, b };
+    });
+  }
+  async function loadLrc(blob, name) {
+    const buf = await blob.arrayBuffer();
+    let text;
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+    catch { text = new TextDecoder('gb18030').decode(buf); }
+    cues = parseLrc(text.replace(/^﻿/, ''));
+    lastCue = null; lastKey = '';
+    loaded.lrc = cues.length ? name : ''; showLoaded();
+  }
+  function renderSubs(t) {
+    let cue = null;
+    for (const c of cues) { if (c.t > t) break; cue = c; }
+    if (cue === lastCue) return;
+    lastCue = cue;
+    $('subA').textContent = cue ? cue.a : '';
+    $('subB').textContent = cue ? cue.b : '';
+  }
+
+  function loadFiles(files) {
+    for (const f of files) {
+      if (/\.lrc$/i.test(f.name)) loadLrc(f, f.name);
+      else if (f.type.startsWith('audio/')) loadAudio(f, f.name);
+    }
+  }
+  $('audioFile').onchange = e => loadFiles(e.target.files);
   const stageEl = $('stage');
   stageEl.addEventListener('dragover', e => { e.preventDefault(); stageEl.classList.add('drop'); });
   stageEl.addEventListener('dragleave', () => stageEl.classList.remove('drop'));
-  stageEl.addEventListener('drop', e => { e.preventDefault(); stageEl.classList.remove('drop'); loadAudio(e.dataTransfer.files[0]); });
+  stageEl.addEventListener('drop', e => { e.preventDefault(); stageEl.classList.remove('drop'); loadFiles(e.dataTransfer.files); });
+
+  // local playback only: `tools/play-local.sh` serves media/ next to the page on 127.0.0.1
+  if (['localhost', '127.0.0.1'].includes(location.hostname)) {
+    fetch('media/song.mp3').then(r => r.ok && r.blob()).then(b => b && loadAudio(b, 'song.mp3')).catch(() => {});
+    fetch('media/lyrics.lrc').then(r => r.ok && r.blob()).then(b => b && loadLrc(b, 'lyrics.lrc')).catch(() => {});
+  }
   audio.onended = () => { if (playing) setPlaying(false); };
   addEventListener('keydown', e => {
     // let focused controls keep their native keys, so nothing fires twice
@@ -520,7 +587,7 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
   function tick() {
     requestAnimationFrame(tick);
     let t = now();
-    if (t >= DURATION) { t = DURATION; if (playing && !hasAudio) setPlaying(false); }
+    if (t >= duration) { t = duration; if (playing && !hasAudio) setPlaying(false); }
     const bpm = clamp(+$('bpm').value || 120, 60, 240);
     // paused frames are identical — skip redraw until something changes
     const key = `${t}|${rows}|${bpm}`;
@@ -531,7 +598,8 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
     screen.innerHTML = g.html();
     renderChat(t);
     renderOverlay(t);
-    $('time').textContent = `${t.toFixed(1).padStart(5, '0')} / ${DURATION}s`;
+    renderSubs(t);
+    $('time').textContent = `${t.toFixed(1).padStart(5, '0')} / ${Math.round(duration)}s`;
     if (document.activeElement !== $('seek')) $('seek').value = t.toFixed(1);
     chapBtns.forEach((b, i) => b.classList.toggle('on', t >= CHAPTERS[i][1] && (i === CHAPTERS.length - 1 || t < CHAPTERS[i + 1][1])));
   }

@@ -10,3 +10,5 @@
 !.dev.vars.example
 .env*
 !.env.example
+media/
+*.lrc
