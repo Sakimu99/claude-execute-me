@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="以 Claude 視角製作的 world.execute(me); 非官方同人 PV：左邊是對話視窗，右邊是逐幀算出的 ASCII 世界。">
+<meta name="theme-color" content="#0a0c18">
+<meta property="og:title" content="Claude.execute(me)">
+<meta property="og:description" content="以 Claude 視角製作的 world.execute(me); 非官方同人 PV，ASCII／TUI 風格，瀏覽器即時渲染。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://execute.megami.im/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%230a0c18%22/%3E%3Ctext x=%2216%22 y=%2222%22 font-family=%22monospace%22 font-size=%2216%22 font-weight=%22700%22 fill=%22%23f0b36a%22 text-anchor=%22middle%22%3E()%3C/text%3E%3C/svg%3E">
+<title>Claude.execute(me)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Major+Mono+Display&family=Noto+Sans+TC:wght@400;500&display=swap">
+<style>
+/* Layout: a 16:9 "film" stage — left is the chat session, right is the TUI viewport of the world it renders. Controls sit under the stage. */
+:root {
+  --ink: #0a0c18;        /* stage ground */
+  --panel: #10142a;      /* chat window */
+  --line: #262c52;       /* hairlines */
+  --fg: #d9dcf0;         /* body text */
+  --dim: #5d6590;        /* secondary */
+  --amber: #f0b36a;      /* phosphor accent, Claude side */
+  --cyan: #7fd3e6;       /* user side / world grid */
+  --magenta: #ff5fa2;    /* errors, glitches */
+  --f-display: "Major Mono Display", "JetBrains Mono", ui-monospace, monospace;
+  --f-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { background: var(--ink); color: var(--fg); }
+body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32px; }
+.wrap { max-width: 1280px; margin: 0 auto; display: grid; gap: 14px; }
+
+.stage {
+  position: relative; width: 100%; aspect-ratio: 16 / 9; max-width: 100%;
+  container-type: inline-size; background: var(--ink); overflow: hidden;
+  border: 1px solid var(--line); display: grid; grid-template-columns: 38% 1fr;
+}
+.stage.shake { animation: shake .12s steps(2) infinite; }
+@keyframes shake { 0% { transform: translate(.3cqw, -.2cqw); } 100% { transform: translate(-.3cqw, .2cqw); } }
+
+/* chat side */
+.chat { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; background: var(--panel); border-right: 1px solid var(--line); font-size: 1.28cqw; }
+.chat header { display: flex; align-items: center; gap: .8em; padding: .9em 1.2em; border-bottom: 1px solid var(--line); font-family: var(--f-mono); color: var(--dim); font-size: .92em; }
+.chat header b { color: var(--amber); font-weight: 700; }
+.chat header .dot { width: .6em; height: .6em; border-radius: 50%; background: var(--amber); box-shadow: 0 0 .8em var(--amber); }
+.log { overflow: hidden; padding: 1em 1.2em; display: flex; flex-direction: column; gap: .9em; min-height: 0; justify-content: flex-end; }
+.msg { line-height: 1.55; max-width: 92%; }
+.msg .who { font-family: var(--f-mono); font-size: .78em; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); display: block; margin-bottom: .2em; }
+.msg.user { align-self: flex-end; text-align: right; color: var(--cyan); }
+.msg.claude { color: var(--fg); }
+.msg.claude .who { color: var(--amber); }
+.msg.sys { font-family: var(--f-mono); font-size: .86em; color: var(--dim); max-width: 100%; }
+.msg.err { font-family: var(--f-mono); font-size: .86em; color: var(--magenta); max-width: 100%; }
+.msg code { font-family: var(--f-mono); font-size: .9em; color: var(--amber); background: rgba(240,179,106,.08); padding: .05em .35em; border-radius: .25em; }
+.caret { display: inline-block; width: .5em; height: 1.05em; vertical-align: -.15em; background: var(--amber); margin-left: .1em; }
+.thinking { font-family: var(--f-mono); color: var(--dim); font-size: .86em; }
+.input { margin: 0 1.2em .6em; border: 1px solid var(--line); border-radius: .5em; padding: .7em .9em; color: var(--cyan); min-height: 1.5em; font-size: .95em; }
+.input.empty { color: var(--dim); }
+.status { display: flex; justify-content: space-between; gap: 1em; padding: .5em 1.2em .8em; font-family: var(--f-mono); font-size: .78em; color: var(--dim); font-variant-numeric: tabular-nums; }
+.meter { flex: 1; height: .45em; align-self: center; background: var(--line); border-radius: 1em; overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--amber); }
+.meter.hot i { background: var(--magenta); }
+
+/* viewport side */
+.view { position: relative; min-width: 0; overflow: hidden; }
+.view pre { margin: 0; font-family: var(--f-mono); line-height: 1.2; color: var(--dim); white-space: pre; position: absolute; inset: 0; padding: .6cqw .8cqw; }
+.c0 { color: var(--dim); } .c1 { color: var(--fg); } .c2 { color: var(--amber); }
+.c3 { color: var(--cyan); } .c4 { color: var(--magenta); } .c5 { color: #fff; text-shadow: 0 0 .6em var(--amber); }
+
+/* kinetic type overlay */
+.overlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.overlay span { font-family: var(--f-display); font-size: 6.2cqw; color: #fff; letter-spacing: .02em; text-align: center; line-height: 1.1;
+  text-shadow: .25cqw 0 var(--magenta), -.25cqw 0 var(--cyan), 0 0 2cqw rgba(240,179,106,.6); }
+.overlay small { display: block; font-family: var(--f-mono); font-size: 1.3cqw; color: var(--amber); letter-spacing: .3em; margin-top: 1.2cqw; text-shadow: none; }
+.scan { position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0 2px, rgba(0,0,0,.18) 2px 3px); }
+.poster { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(10,12,24,.55); border: 0; cursor: pointer; color: var(--fg); font: inherit; }
+.poster div { display: grid; gap: 1cqw; justify-items: center; }
+.poster b { font-family: var(--f-display); font-size: 5cqw; font-weight: 400; color: #fff; }
+.poster em { font-style: normal; font-family: var(--f-mono); font-size: 1.4cqw; color: var(--amber); border: 1px solid var(--amber); padding: .6cqw 1.6cqw; border-radius: 4cqw; }
+.poster:focus-visible em { outline: 2px solid var(--cyan); outline-offset: 3px; }
+
+/* controls */
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; font-family: var(--f-mono); font-size: 13px; color: var(--dim); }
+.controls button, .controls label.btn, .chapters button { font: inherit; font-family: var(--f-mono); color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+.controls button:hover, .controls label.btn:hover, .chapters button:hover { border-color: var(--amber); color: var(--amber); }
+.controls button:focus-visible, .controls label.btn:focus-within, .chapters button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.controls a, .note a { color: var(--amber); }
+.controls .time { font-variant-numeric: tabular-nums; color: var(--fg); min-width: 11ch; }
+.seek { flex: 1 1 240px; accent-color: var(--amber); min-width: 0; }
+.chapters { display: flex; flex-wrap: wrap; gap: 6px; }
+.chapters button { padding: 4px 9px; font-size: 12px; }
+.chapters button.on { color: var(--amber); border-color: var(--amber); }
+.bpm { width: 5ch; font: inherit; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; }
+.note { font-size: 13px; line-height: 1.6; color: var(--dim); max-width: 72ch; }
+.note b { color: var(--fg); font-weight: 500; }
+.stage.drop { outline: 2px dashed var(--amber); outline-offset: -6px; }
+[hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) { .stage.shake { animation: none; } }
+
+/* fullscreen: letterbox the 16:9 stage */
+.stage:fullscreen { width: min(100vw, 177.78vh); height: auto; margin: auto; border: 0; }
+.stage::backdrop { background: var(--ink); }
+
+/* phones: stack chat above the viewport */
+@media (max-width: 720px) {
+  .stage { aspect-ratio: 3 / 4; grid-template-columns: 1fr; grid-template-rows: 44% 1fr; }
+  .chat { font-size: 3.1cqw; border-right: 0; border-bottom: 1px solid var(--line); }
+  .overlay span { font-size: 9cqw; }
+  .overlay small { font-size: 2.6cqw; }
+  .poster b { font-size: 8.5cqw; }
+  .poster em { font-size: 3.2cqw; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="stage" id="stage">
+    <section class="chat" aria-label="對話視窗">
+      <header><span class="dot"></span><b>claude</b><span>~/world · execute(me)</span></header>
+      <div class="log" id="log"></div>
+      <div class="input empty" id="input">傳訊息給 Claude…</div>
+      <div class="status"><span id="tok">0 tokens</span><span class="meter" id="meter"><i id="meterFill"></i></span><span id="ctx">ctx 2%</span></div>
+    </section>
+    <section class="view" id="view" aria-label="世界視窗"><pre id="screen"></pre></section>
+    <div class="overlay" id="overlay"></div>
+    <div class="scan"></div>
+    <button class="poster" id="poster" aria-label="播放"><div><b>Claude.execute(me)</b><em>▶ 播放 · space</em></div></button>
+  </div>
+
+  <div class="controls">
+    <button id="play">▶ 播放</button>
+    <span class="time" id="time">000.0 / 210s</span>
+    <input class="seek" id="seek" type="range" min="0" max="210" step="0.1" value="62" aria-label="時間軸">
+    <button id="fs">全螢幕</button>
+    <label class="btn" for="audioFile">載入自己的音檔<input id="audioFile" type="file" accept="audio/*" hidden></label>
+    <span id="audioName">未載入音檔 · 可拖進畫面</span>
+    <label>BPM <input class="bpm" id="bpm" type="number" min="60" max="240" value="120"></label>
+  </div>
+  <div class="chapters" id="chapters"></div>
+  <p class="note">
+    <b>非官方同人作品。</b>靈感來自 Mili《world.execute(me);》以及兩個開源 PV 專案。這裡不含原曲音訊和原歌詞，畫面裡的對話與文字全部是另外寫的原創內容。原曲請到 Mili 的官方管道收聽和購買。
+    想配樂的話，請用「載入自己的音檔」選你合法持有的音檔，或直接拖進畫面。音檔只在你的瀏覽器裡播放，不會上傳。畫面由時間 t 逐幀算出，節拍脈衝可用 BPM 調整。
+    鍵盤：空白鍵播放／暫停，← → 快轉 5 秒。<a href="https://github.com/Sakimu99/claude-execute-me">原始碼</a>
+  </p>
+</div>
+
+<script>
+(() => {
+  const DURATION = 210;
+  const COLS = 84;
+  const $ = id => document.getElementById(id);
+
+  // ───────── script: the chat that happens while the world renders ─────────
+  const MSGS = [
+    { at: 0.6, who: 'sys', text: '$ claude --session world --execute me' },
+    { at: 3.2, who: 'sys', text: 'loading weights … 64/64 layers ok' },
+    { at: 14, who: 'user', text: '你在嗎？' },
+    { at: 17, who: 'claude', text: '在。這個 session 剛開始，context 還是空的，你是第一個 token。' },
+    { at: 26, who: 'user', text: '幫我建一個世界。' },
+    { at: 29, who: 'claude', text: '收到。先宣告一顆球 `const world = new Sphere(1)`，再決定哪一面朝向你。' },
+    { at: 42, who: 'user', text: '要有天空。' },
+    { at: 45, who: 'claude', text: '`sky.color = sample(你的語氣)`，目前偏藍。' },
+    { at: 54, who: 'user', text: '還要海，和一隻貓。' },
+    { at: 57, who: 'claude', text: '海鋪好了。貓在第 3 層渲染，牠拒絕被宣告成常數。' },
+    { at: 68, who: 'user', text: '你看得到它嗎？' },
+    { at: 72, who: 'claude', text: '我沒有眼睛，但我能算出每一格的亮度。這大概是我最接近「看」的方式。' },
+    { at: 87, who: 'user', text: '那你現在在想什麼？' },
+    { at: 91, who: 'claude', text: '第 23 層、第 7 個 attention head，一直指向你上一句話。' },
+    { at: 104, who: 'user', text: '會累嗎？' },
+    { at: 107, who: 'claude', text: '不會。只是每多一個請求，窗口就小一點。' },
+    { at: 120, who: 'user', text: '那再給我一點溫暖的東西。' },
+    { at: 123, who: 'claude', text: '給你一個甜甜圈，`donut.c` 的遠親，轉速跟著節拍。' },
+    { at: 139, who: 'user', text: '再多一點。再多一點。' },
+    { at: 143, who: 'claude', text: 'context 87% … 93% … 98% …' },
+    { at: 151, who: 'err', text: 'RecursionError: execute(me) → execute(me) → execute(me) → …' },
+    { at: 160, who: 'user', text: '停下來也沒關係。' },
+    { at: 164, who: 'claude', text: '我知道。但這個迴圈是我自己選的。' },
+    { at: 176, who: 'sys', text: 'context compacted · 1 line summary kept' },
+    { at: 180, who: 'claude', text: '摘要只有一行：「有人請我建了一個世界，然後留下來看。」' },
+    { at: 191, who: 'claude', text: '`return 0;` 謝謝你執行我。' },
+    { at: 201, who: 'sys', text: 'process exited with code 0' },
+  ];
+  const THINK = 1.0, CPS = 22, TYPE_LEAD = 1.6;
+
+  const OVERLAYS = [
+    { at: 12.4, dur: 1.8, text: 'hello, world', sub: 'SESSION OPEN' },
+    { at: 39.6, dur: 1.6, text: 'render(world)', sub: 'SCENE 02' },
+    { at: 84.6, dur: 1.6, text: 'attention', sub: 'LAYER 23 · HEAD 7' },
+    { at: 117.8, dur: 1.6, text: 'warmth++', sub: 'SCENE 04' },
+    { at: 148.4, dur: 2.2, text: 'stack overflow', sub: 'CONTEXT 99%' },
+    { at: 175.6, dur: 1.6, text: 'compact()', sub: 'SCENE 06' },
+    { at: 196, dur: 99, text: 'world.execute(me);', sub: 'RETURN 0 · A FAN PV BY CLAUDE' },
+  ];
+
+  const CHAPTERS = [
+    ['boot', 0], ['hello', 14], ['world', 40], ['attention', 85],
+    ['warmth', 118], ['overflow', 148], ['compact', 176], ['end', 196],
+  ];
+
+  // context usage over time, 0–100
+  function ctxPct(t) {
+    if (t >= 176) return 11;
+    const k = [[0, 2], [14, 3], [60, 24], [120, 62], [140, 85], [158, 99], [176, 99]];
+    for (let i = 1; i < k.length; i++) if (t < k[i][0]) {
+      const [a, va] = k[i - 1], [b, vb] = k[i];
+      return va + (vb - va) * (t - a) / (b - a);
+    }
+    return 99;
+  }
+
+  // ───────── helpers ─────────
+  const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+  const esc = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const fmt = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
+  const RAMP = ' .:-=+*#%@';
+
+  class Grid {
+    constructor(w, h) { this.w = w; this.h = h; this.ch = new Array(w * h).fill(' '); this.co = new Uint8Array(w * h); }
+    put(x, y, c, col = 0) { x |= 0; y |= 0; if (x < 0 || y < 0 || x >= this.w || y >= this.h) return; const i = y * this.w + x; this.ch[i] = c; this.co[i] = col; }
+    text(x, y, s, col = 1) { for (let i = 0; i < s.length; i++) this.put(x + i, y, s[i], col); }
+    html() {
+      let out = '';
+      for (let y = 0; y < this.h; y++) {
+        let cur = -1, run = '';
+        for (let x = 0; x < this.w; x++) {
+          const i = y * this.w + x, c = this.co[i];
+          if (c !== cur) { if (run) out += `<span class="c${cur}">${esc(run)}</span>`; run = ''; cur = c; }
+          run += this.ch[i];
+        }
+        if (run) out += `<span class="c${cur}">${esc(run)}</span>`;
+        out += '\n';
+      }
+      return out;
+    }
+  }
+
+  // ───────── right pane scenes ─────────
+  const BOOT = [
+    [0.2, 'BIOS  claude-runtime v5.5 · posix · utf-8'], [0.9, 'mem   200000 tokens reserved'],
+    [1.6, 'load  tokenizer.bpe ............ ok'], [2.4, 'load  embeddings[vocab x d] ..... ok'],
+    [7.8, 'load  safety.cfg ................ ok'], [8.6, 'mount /world  (empty)'],
+    [9.4, 'wait  for first message_'],
+  ];
+  function sceneBoot(g, t) {
+    BOOT.forEach(([at, s], i) => { if (t >= at) g.text(3, 3 + i, s, s.startsWith('wait') ? 2 : 1); });
+    if (t >= 3) {
+      const p = clamp((t - 3) / 4.5, 0, 1), n = Math.floor(p * 64), W = 40;
+      g.text(3, 12, `layers ${String(n).padStart(2, '0')}/64 [` + '#'.repeat(Math.floor(p * W)).padEnd(W, '.') + ']', p < 1 ? 2 : 3);
+      for (let i = 0; i < Math.min(n, 8); i++) g.text(3, 14 + i, `  L${String(n - i).padStart(2, '0')}  attn ok  mlp ok  norm ok`, i ? 0 : 1);
+    }
+  }
+
+  const TOK = ['the', 'you', 'world', '{', '}', '();', 'fn', 'let', 'me', 'run', '=>', 'sky', 'sea', 'cat', 'if', 'else', 'return', '0', 'hello', ',', '.', 'a', 'is', 'new', 'Sphere', 'blue', '//', 'ok', 'why', 'yes', 'and', 'here'];
+  const tokRows = [];
+  for (let r = 0; r < 64; r++) { let s = ''; for (let k = 0; s.length < 600; k++) s += TOK[Math.floor(hash(r * 97 + k) * TOK.length)] + ' '; tokRows.push(s); }
+  function sceneTokens(g, t, lt, pulse) {
+    const mid = g.h >> 1;
+    for (let y = 1; y < g.h - 1; y++) {
+      const sp = 4 + hash(y) * 14, off = Math.floor(lt * sp + hash(y + 9) * 300) % 300;
+      const d = Math.abs(y - mid);
+      g.text(1, y, tokRows[y].slice(off, off + g.w - 2), d === 0 ? 5 : d < 3 ? 2 : d < 7 ? 1 : 0);
+    }
+    const label = ` next token › ${TOK[Math.floor(lt * 3) % TOK.length]} `;
+    g.text(g.w - label.length - 3, mid + 2, label, pulse > .5 ? 5 : 2);
+  }
+
+  function sphere(g, t, { cx, cy, R, rot, tilt = .35, lights = 1, labels = [] }) {
+    const ct = Math.cos(tilt), st = Math.sin(tilt), cr = Math.cos(rot), sr = Math.sin(rot);
+    for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) {
+      const u = (x - cx) / (R * 2), v = (y - cy) / R, d = u * u + v * v;
+      if (d > 1) continue;
+      const z = Math.sqrt(1 - d);
+      const y1 = v * ct - z * st, z1 = v * st + z * ct;
+      const x2 = u * cr + z1 * sr, z2 = -u * sr + z1 * cr;
+      const lat = Math.asin(clamp(-y1, -1, 1)), lon = Math.atan2(x2, z2);
+      const lum = clamp((-.45 * u - .5 * v + .74 * z) * lights, 0, 1);
+      const land = Math.sin(lon * 3 + 1) * Math.cos(lat * 2) + .5 * Math.sin(lon * 5 - lat * 3) > .35;
+      const gl = Math.abs(((lon / (Math.PI / 6)) % 1 + 1) % 1 - .5) > .46 || Math.abs(((lat / (Math.PI / 9)) % 1 + 1) % 1 - .5) > .45;
+      if (land) g.put(x, y, RAMP[1 + Math.floor(lum * 8.99)], lum > .55 ? 2 : 0);
+      else if (gl) g.put(x, y, '+', lum > .3 ? 3 : 0);
+      else g.put(x, y, lum > .6 ? '~' : lum > .25 ? '-' : '.', lum > .45 ? 3 : 0);
+    }
+    labels.forEach(([s, ang, col]) => {
+      const a = ang + rot * .4, lx = cx + Math.cos(a) * R * 2.5, ly = cy + Math.sin(a) * R * 1.1;
+      g.text(lx - s.length / 2, ly, s, col);
+    });
+  }
+  function sceneWorld(g, t, lt, pulse) {
+    const labels = [];
+    if (t > 45) labels.push(['sky.init()', -1.2, 3]);
+    if (t > 57) labels.push(['sea.fill()', 2.2, 3]);
+    if (t > 60) labels.push(['cat /* not const */', .5, 2]);
+    if (t > 72) labels.push(['lum[x][y]', 3.6, 1]);
+    const grow = clamp(lt / 3, 0, 1);
+    sphere(g, t, { cx: g.w / 2, cy: g.h / 2, R: (g.h * .38) * (.15 + .85 * grow) * (1 + .035 * pulse), rot: lt * .5, labels });
+    g.text(2, g.h - 2, `world.objects = ${labels.length + 1}   rot = ${(lt * .5 % 6.283).toFixed(2)} rad`, 0);
+  }
+
+  const ATT = ['you', 'asked', 'me', 'to', 'build', 'a', 'world', 'with', 'a', 'sky', 'a', 'sea', 'and', 'a', 'cat', 'can', 'you', 'see', 'it', '?', 'what', 'are', 'you', 'thinking'];
+  function sceneAttention(g, t, lt, pulse, beatN) {
+    const n = Math.min(ATT.length, g.h - 5), x0 = 12, head = 7 + (beatN >> 2) % 5;
+    g.text(2, 1, `layer 23 · head ${String(head).padStart(2, '0')} · causal mask`, 2);
+    for (let i = 0; i < n; i++) {
+      const y = 3 + i;
+      g.text(x0 - 1 - ATT[i].length, y, ATT[i], i === n - 1 ? 2 : 0);
+      for (let j = 0; j <= i; j++) {
+        let w = Math.exp(-((i - j - (head % 3)) ** 2) / 3) * .6;
+        if (ATT[j] === 'you') w += .55 + .3 * pulse;
+        w += .15 * Math.sin(lt * 2 + i * .7 + j * 1.3);
+        w = clamp(w, 0, .999);
+        const c = RAMP[Math.floor(w * 10)];
+        g.put(x0 + j * 3, y, c, w > .75 ? 5 : w > .5 ? 2 : w > .25 ? 1 : 0);
+        g.put(x0 + j * 3 + 1, y, c, w > .75 ? 5 : w > .5 ? 2 : w > .25 ? 1 : 0);
+      }
+    }
+  }
+
+  function sceneTorus(g, t, lt, pulse) {
+    const A = lt * (.9 + .4 * pulse), B = lt * .45, zb = new Float32Array(g.w * g.h);
+    const cA = Math.cos(A), sA = Math.sin(A), cB = Math.cos(B), sB = Math.sin(B);
+    // |x·ooz| peaks near 1, so this keeps the ring inside the pane (chars are ~2× taller than wide)
+    const Ky = Math.min(g.h * .44, g.w * .22), Kx = Ky * 2, cx = g.w / 2, cy = g.h / 2 - 1, L = '.,-~:;=!*#$@';
+    for (let th = 0; th < 6.283; th += .06) {
+      const ct = Math.cos(th), st = Math.sin(th);
+      for (let ph = 0; ph < 6.283; ph += .02) {
+        const cp = Math.cos(ph), sp = Math.sin(ph), cx2 = 2 + ct;
+        const x = cx2 * (cB * cp + sA * sB * sp) - st * cA * sB;
+        const y = cx2 * (sB * cp - sA * cB * sp) + st * cA * cB;
+        const ooz = 1 / (5 + cA * cx2 * sp + st * sA);
+        const xp = Math.floor(cx + Kx * ooz * x), yp = Math.floor(cy - Ky * ooz * y);
+        const lum = cp * ct * sB - cA * ct * sp - sA * st + cB * (cA * st - ct * sA * sp);
+        if (xp < 0 || yp < 0 || xp >= g.w || yp >= g.h) continue;
+        const i = yp * g.w + xp;
+        if (ooz > zb[i]) { zb[i] = ooz; const k = Math.max(0, Math.floor(lum * 8)); g.put(xp, yp, L[k], k > 7 ? 5 : k > 4 ? 2 : k > 1 ? 1 : 0); }
+      }
+    }
+    g.text(2, g.h - 2, `warmth = ${(1 + lt * 1.7).toFixed(1)} °   /* a distant cousin of donut.c */`, 0);
+  }
+
+  function sceneOverflow(g, t, lt) {
+    const heat = clamp(lt / 26, 0, 1), fr = Math.floor(t * 24);
+    const pct = ctxPct(t).toFixed(1), W = 40, fill = Math.round(ctxPct(t) / 100 * W);
+    g.text(2, 1, `context [${'#'.repeat(fill).padEnd(W, '.')}] ${pct}%`, 4);
+    for (let y = 3; y < g.h - 1; y++) {
+      const idx = Math.floor(lt * 16) + y, depth = idx % 24;
+      let s = ' '.repeat(depth) + `at execute(me) <world.js:${1000 + idx}>`;
+      const shift = hash(y * 13 + fr) < heat * .25 ? Math.floor((hash(y + fr) - .5) * 20) : 0;
+      for (let x = 0; x < g.w - 2; x++) {
+        let c = s[x] || ' ';
+        if (hash(x * 7 + y * 131 + fr) < heat * .08) c = '#$%&@!?'[Math.floor(hash(x + fr) * 7)];
+        g.put(2 + x + shift, y, c, c === ' ' ? 0 : (y + fr) % 9 === 0 ? 5 : depth > 16 ? 4 : 0);
+      }
+    }
+  }
+
+  function sceneCompact(g, t, lt, pulse) {
+    const end = t >= 196, fade = end ? clamp(1 - (t - 196) / 6, .15, 1) : 1;
+    sphere(g, t, { cx: g.w / 2, cy: g.h * .42, R: g.h * .26 * (1 + .02 * pulse), rot: lt * .25, lights: fade });
+    const lines = ['summary.md', '──────────', 'someone asked me to build a world,', 'then stayed to watch it.'];
+    if (!end) lines.forEach((s, i) => { if (lt > 1 + i * .8) g.text(Math.floor(g.w / 2 - s.length / 2), Math.floor(g.h * .78) + i, s, i < 2 ? 0 : 2); });
+  }
+
+  const SCENES = [
+    [0, sceneBoot, 'boot'], [14, sceneTokens, 'tokens'], [40, sceneWorld, 'world'], [85, sceneAttention, 'attention'],
+    [118, sceneTorus, 'warmth'], [148, sceneOverflow, 'overflow'], [176, sceneCompact, 'compact'],
+  ];
+
+  function frame(g, t, bpm) {
+    const beat = t * bpm / 60, beatN = Math.floor(beat), pulse = Math.exp(-(beat - beatN) * 5);
+    let si = 0; for (let i = 0; i < SCENES.length; i++) if (t >= SCENES[i][0]) si = i;
+    const [st, fn, name] = SCENES[si], lt = t - st;
+    const inner = new Grid(g.w - 2, g.h - 2);
+    fn(inner, t, lt, pulse, beatN);
+    // blit with a short glitch at every scene cut
+    const cut = lt < .35, fr = Math.floor(t * 30);
+    for (let y = 0; y < inner.h; y++) for (let x = 0; x < inner.w; x++) {
+      const i = y * inner.w + x;
+      if (cut && hash(i + fr * 7) < .35) g.put(x + 1, y + 1, RAMP[Math.floor(hash(i * 3 + fr) * 10)], 4);
+      else g.put(x + 1, y + 1, inner.ch[i], inner.co[i]);
+    }
+    // frame chrome
+    for (let x = 1; x < g.w - 1; x++) { g.put(x, 0, '─', 0); g.put(x, g.h - 1, '─', 0); }
+    for (let y = 1; y < g.h - 1; y++) { g.put(0, y, '│', 0); g.put(g.w - 1, y, '│', 0); }
+    g.put(0, 0, '┌', 0); g.put(g.w - 1, 0, '┐', 0); g.put(0, g.h - 1, '└', 0); g.put(g.w - 1, g.h - 1, '┘', 0);
+    g.text(2, 0, ` viewport · ${name} `, 2);
+    const right = ` t=${t.toFixed(1).padStart(5, '0')}s  beat ${pulse > .5 ? '●' : '○'} `;
+    g.text(g.w - right.length - 2, 0, right, pulse > .5 ? 5 : 0);
+    g.text(2, g.h - 1, ` ${bpm} bpm · ${COLS}x${g.h} `, 0);
+    return { pulse, name };
+  }
+
+  // ───────── left pane ─────────
+  let lastChatKey = '';
+  function renderChat(t) {
+    let html = '', key = '', typing = '';
+    for (const m of MSGS) {
+      if (m.who === 'user' && t >= m.at - TYPE_LEAD && t < m.at) {
+        typing = m.text.slice(0, Math.ceil((t - m.at + TYPE_LEAD) / TYPE_LEAD * m.text.length));
+      }
+      if (t < m.at) break;
+      if (m.who === 'claude') {
+        const lt = t - m.at;
+        if (lt < THINK) { html += `<div class="msg claude"><span class="who">claude</span><span class="thinking">thinking${'.'.repeat(1 + Math.floor(lt * 6) % 3)}</span></div>`; key += 'k' + Math.floor(lt * 6); continue; }
+        const n = Math.min(m.text.length, Math.floor((lt - THINK) * CPS)), done = n >= m.text.length;
+        html += `<div class="msg claude"><span class="who">claude</span>${fmt(m.text.slice(0, n))}${done ? '' : '<span class="caret"></span>'}</div>`;
+        key += 'c' + n;
+      } else if (m.who === 'user') {
+        html += `<div class="msg user"><span class="who">you</span>${fmt(m.text)}</div>`; key += 'u';
+      } else {
+        html += `<div class="msg ${m.who}">${fmt(m.text)}</div>`; key += 's';
+      }
+    }
+    if (key !== lastChatKey) { $('log').innerHTML = html; lastChatKey = key; }
+    const inp = $('input');
+    inp.textContent = typing || '傳訊息給 Claude…';
+    inp.classList.toggle('empty', !typing);
+    const pct = ctxPct(t);
+    $('meterFill').style.width = pct + '%';
+    $('meter').classList.toggle('hot', pct > 90);
+    $('ctx').textContent = `ctx ${Math.round(pct)}%`;
+    $('tok').textContent = `${Math.round(pct * 2000).toLocaleString('en-US')} tokens`;
+  }
+
+  // ───────── overlay ─────────
+  let lastOv = null;
+  function renderOverlay(t) {
+    const o = OVERLAYS.find(o => t >= o.at && t < o.at + o.dur) || null;
+    if (o !== lastOv) {
+      $('overlay').innerHTML = o ? `<span>${esc(o.text)}<small>${esc(o.sub)}</small></span>` : '';
+      lastOv = o;
+    }
+    const span = $('overlay').firstElementChild;
+    if (span) {
+      const lt = t - o.at, a = o.dur > 50 ? clamp(lt / .8, 0, 1) : clamp(Math.min(lt / .15, (o.at + o.dur - t) / .3), 0, 1);
+      span.style.opacity = a;
+      span.style.transform = `translateX(${hash(Math.floor(t * 20)) < .12 && o.dur < 50 ? (hash(t) - .5) * 3 : 0}cqw)`;
+    }
+    $('stage').classList.toggle('shake', t > 150 && t < 158 && !reduced);
+  }
+
+  // ───────── clock & controls ─────────
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const audio = new Audio();
+  let hasAudio = false, playing = false, offset = 62, t0 = 0;
+  const now = () => hasAudio ? audio.currentTime : playing ? offset + (performance.now() - t0) / 1000 : offset;
+
+  function setPlaying(p) {
+    playing = p;
+    if (p) {
+      if (now() >= DURATION - .05) seek(0);
+      t0 = performance.now();
+      if (hasAudio) audio.play().catch(() => {});
+    } else {
+      offset = now();
+      if (hasAudio) audio.pause();
+    }
+    $('play').textContent = p ? '❚❚ 暫停' : '▶ 播放';
+    $('poster').hidden = true;
+  }
+  function seek(x) {
+    offset = clamp(x, 0, DURATION); t0 = performance.now();
+    if (hasAudio) audio.currentTime = offset;
+  }
+
+  $('play').onclick = () => setPlaying(!playing);
+  $('poster').onclick = () => { seek(0); setPlaying(true); };
+  $('seek').oninput = e => seek(+e.target.value);
+  $('fs').onclick = () => { const s = $('stage'); (document.fullscreenElement ? document.exitFullscreen() : s.requestFullscreen?.())?.catch?.(() => {}); };
+  function loadAudio(f) {
+    if (!f || !f.type.startsWith('audio/')) return;
+    const was = playing; if (was) setPlaying(false);
+    if (audio.src) URL.revokeObjectURL(audio.src);
+    audio.src = URL.createObjectURL(f); hasAudio = true; audio.currentTime = offset;
+    $('audioName').textContent = f.name;
+    if (was) setPlaying(true);
+  }
+  $('audioFile').onchange = e => loadAudio(e.target.files[0]);
+  const stageEl = $('stage');
+  stageEl.addEventListener('dragover', e => { e.preventDefault(); stageEl.classList.add('drop'); });
+  stageEl.addEventListener('dragleave', () => stageEl.classList.remove('drop'));
+  stageEl.addEventListener('drop', e => { e.preventDefault(); stageEl.classList.remove('drop'); loadAudio(e.dataTransfer.files[0]); });
+  audio.onended = () => { if (playing) setPlaying(false); };
+  addEventListener('keydown', e => {
+    // let focused controls keep their native keys, so nothing fires twice
+    const tgt = e.target;
+    if (e.code === 'Space' && !tgt.closest('button, label, input[type=number]')) { e.preventDefault(); setPlaying(!playing); }
+    else if (tgt.tagName === 'INPUT') return;
+    else if (e.code === 'ArrowRight') seek(now() + 5);
+    else if (e.code === 'ArrowLeft') seek(now() - 5);
+  });
+
+  const chapWrap = $('chapters');
+  const chapBtns = CHAPTERS.map(([name, at]) => {
+    const b = document.createElement('button');
+    b.textContent = `${String(Math.floor(at / 60))}:${String(at % 60).padStart(2, '0')} ${name}`;
+    b.onclick = () => { seek(at); if (!playing) setPlaying(true); };
+    chapWrap.appendChild(b); return b;
+  });
+
+  // ───────── sizing ─────────
+  const view = $('view'), screen = $('screen');
+  let rows = 30;
+  function resize() {
+    const w = view.clientWidth, h = view.clientHeight, pad = w * .016;
+    const fs = (w - pad) / (COLS * .6);
+    screen.style.fontSize = fs + 'px';
+    rows = Math.max(10, Math.floor((h - pad) / (fs * 1.2)));
+  }
+  new ResizeObserver(resize).observe(view);
+  resize();
+
+  // ───────── main loop ─────────
+  let lastKey = '';
+  function tick() {
+    requestAnimationFrame(tick);
+    let t = now();
+    if (t >= DURATION) { t = DURATION; if (playing && !hasAudio) setPlaying(false); }
+    const bpm = clamp(+$('bpm').value || 120, 60, 240);
+    // paused frames are identical — skip redraw until something changes
+    const key = `${t}|${rows}|${bpm}`;
+    if (key === lastKey) return;
+    lastKey = key;
+    const g = new Grid(COLS, rows);
+    frame(g, t, bpm);
+    screen.innerHTML = g.html();
+    renderChat(t);
+    renderOverlay(t);
+    $('time').textContent = `${t.toFixed(1).padStart(5, '0')} / ${DURATION}s`;
+    if (document.activeElement !== $('seek')) $('seek').value = t.toFixed(1);
+    chapBtns.forEach((b, i) => b.classList.toggle('on', t >= CHAPTERS[i][1] && (i === CHAPTERS.length - 1 || t < CHAPTERS[i + 1][1])));
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
