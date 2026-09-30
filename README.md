@@ -39,10 +39,18 @@ BPM 欄位用來調整節拍脈衝，方便對齊你自己的音檔。
 ## 本機執行
 
 ```bash
-python3 -m http.server 8080
+python3 -m http.server 8080 --directory public
 ```
 
 然後打開 http://localhost:8080 。
+
+## 部署
+
+網站檔案放在 `public/`，部署到 Cloudflare（Pages 已併入 Workers 靜態資源），自訂網域設定在 `wrangler.jsonc`：
+
+```bash
+npx wrangler deploy
+```
 
 ## 致謝
 
