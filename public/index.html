@@ -1134,6 +1134,15 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
   // Default media is shipped with the page on every host.
   showLoaded();
   async function loadDefaults() {
+    // A local blob remains seekable even when the host ignores HTTP Range.
+    try {
+      const response = await fetch('song.mp3');
+      if (!response.ok) throw new Error('Audio unavailable');
+      const blob = await response.blob();
+      if (loaded.audio === 'song.mp3') loadAudio(blob, 'song.mp3');
+    } catch {
+      // Keep the direct audio URL as a fallback if the download fails.
+    }
     try {
       const response = await fetch('lrc.lrc');
       if (!response.ok) throw new Error('Lyrics unavailable');
