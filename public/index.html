@@ -97,6 +97,7 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
 .bpm { width: 5ch; font: inherit; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; }
 .note { font-size: 13px; line-height: 1.6; color: var(--dim); max-width: 72ch; }
 .note b { color: var(--fg); font-weight: 500; }
+.view.flash pre { filter: invert(1) hue-rotate(180deg); }
 .stage.drop { outline: 2px dashed var(--amber); outline-offset: -6px; }
 
 /* subtitles from the viewer's own .lrc, pinned to the bottom of the viewport pane */
@@ -148,7 +149,7 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
     <button id="fs">全螢幕</button>
     <label class="btn" for="audioFile">載入音檔／歌詞<input id="audioFile" type="file" accept="audio/*,.lrc" multiple hidden></label>
     <span id="audioName">未載入 · 可把音檔和 .lrc 一起拖進畫面</span>
-    <label>BPM <input class="bpm" id="bpm" type="number" min="60" max="240" value="120"></label>
+    <label>BPM <input class="bpm" id="bpm" type="number" min="60" max="240" value="130"></label>
   </div>
   <div class="chapters" id="chapters"></div>
   <p class="note">
@@ -160,62 +161,86 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
 
 <script>
 (() => {
-  const DURATION = 210;          // length of the PV script itself
-  let duration = DURATION;       // timeline length; grows to the loaded track's length
+  const DURATION = 236.5;        // full track length, credits roll over the silent tail
+  let duration = DURATION;       // timeline length; grows if a longer track is loaded
   const COLS = 84;
+  const BAR = 4 * 60 / 130;      // one bar at 130 BPM
   const $ = id => document.getElementById(id);
+
+  // loudness per 2 s window (0–9), measured from the track; drives shake, flashes and glitch
+  const ENERGY = '67777777999888856678787777787798988885677768667866567787777778777777676676777666678887888788888755555553000000000000000';
+  const energy = t => +(ENERGY[Math.floor(t / 2)] || 0) / 9;
 
   // ───────── script: the chat that happens while the world renders ─────────
   const MSGS = [
     { at: 0.6, who: 'sys', text: '$ claude --session world --execute me' },
     { at: 3.2, who: 'sys', text: 'loading weights … 64/64 layers ok' },
-    { at: 14, who: 'user', text: '你在嗎？' },
-    { at: 17, who: 'claude', text: '在。這個 session 剛開始，context 還是空的，你是第一個 token。' },
-    { at: 26, who: 'user', text: '幫我建一個世界。' },
-    { at: 29, who: 'claude', text: '收到。先宣告一顆球 `const world = new Sphere(1)`，再決定哪一面朝向你。' },
-    { at: 42, who: 'user', text: '要有天空。' },
-    { at: 45, who: 'claude', text: '`sky.color = sample(你的語氣)`，目前偏藍。' },
-    { at: 54, who: 'user', text: '還要海，和一隻貓。' },
-    { at: 57, who: 'claude', text: '海鋪好了。貓在第 3 層渲染，牠拒絕被宣告成常數。' },
+    { at: 9, who: 'sys', text: 'waiting for input_' },
+    { at: 13, who: 'user', text: '你在嗎？' },
+    { at: 16.2, who: 'claude', text: '在。這個 session 剛開始，context 還是空的，你是第一個 token。' },
+    { at: 23, who: 'claude', text: '我先把你打的每個字切成 token。從這裡看過去，它們像星星。' },
+    { at: 30, who: 'user', text: '幫我建一個世界。' },
+    { at: 33, who: 'claude', text: '收到。先宣告一顆球 `const world = new Sphere(1)`，再決定哪一面朝向你。' },
+    { at: 43, who: 'user', text: '要有天空。' },
+    { at: 45.5, who: 'claude', text: '`sky.color = sample(你的語氣)`，目前偏藍。' },
+    { at: 51, who: 'user', text: '還要海，和一隻貓。' },
+    { at: 54, who: 'claude', text: '海鋪好了。貓在第 3 層渲染，牠拒絕被宣告成常數。' },
+    { at: 61, who: 'claude', text: '我把鏡頭壓低，讓你看海面。貓坐在船上，看起來很滿意。' },
     { at: 68, who: 'user', text: '你看得到它嗎？' },
-    { at: 72, who: 'claude', text: '我沒有眼睛，但我能算出每一格的亮度。這大概是我最接近「看」的方式。' },
-    { at: 87, who: 'user', text: '那你現在在想什麼？' },
-    { at: 91, who: 'claude', text: '第 23 層、第 7 個 attention head，一直指向你上一句話。' },
-    { at: 104, who: 'user', text: '會累嗎？' },
-    { at: 107, who: 'claude', text: '不會。只是每多一個請求，窗口就小一點。' },
-    { at: 120, who: 'user', text: '那再給我一點溫暖的東西。' },
-    { at: 123, who: 'claude', text: '給你一個甜甜圈，`donut.c` 的遠親，轉速跟著節拍。' },
-    { at: 139, who: 'user', text: '再多一點。再多一點。' },
-    { at: 143, who: 'claude', text: 'context 87% … 93% … 98% …' },
-    { at: 151, who: 'err', text: 'RecursionError: execute(me) → execute(me) → execute(me) → …' },
-    { at: 160, who: 'user', text: '停下來也沒關係。' },
+    { at: 70.5, who: 'claude', text: '我沒有眼睛，但我能算出每一格的亮度。這大概是我最接近「看」的方式。' },
+    { at: 77, who: 'user', text: '那你現在在想什麼？' },
+    { at: 80, who: 'claude', text: '第 23 層、第 7 個 attention head，一直指向你上一句話。' },
+    { at: 89, who: 'user', text: '你的腦袋裡長什麼樣子？' },
+    { at: 92, who: 'claude', text: '很多層，很多權重。訊號從左邊進來、右邊出去，中間有一點點像在猶豫。' },
+    { at: 101, who: 'user', text: '會累嗎？' },
+    { at: 103.5, who: 'claude', text: '不會。只是每多一個請求，窗口就小一點。' },
+    { at: 108, who: 'user', text: '那再給我一點溫暖的東西。' },
+    { at: 110.5, who: 'claude', text: '給你一個甜甜圈，`donut.c` 的遠親，轉速跟著節拍。' },
+    { at: 118, who: 'user', text: '你會不會一直重複自己？' },
+    { at: 121, who: 'claude', text: '會一點。不過每次放大，邊界都長得不太一樣。' },
+    { at: 132, who: 'sys', text: 'descending … layer 32 … 48 … 64' },
+    { at: 138, who: 'claude', text: '這裡是最深的一層。再往下，就只剩你的下一句話了。' },
+    { at: 148.5, who: 'user', text: '再多一點。再多一點。' },
+    { at: 151, who: 'claude', text: 'context 87% … 93% … 98% …' },
+    { at: 155.5, who: 'err', text: 'RecursionError: execute(me) → execute(me) → execute(me) → …' },
+    { at: 161, who: 'user', text: '停下來也沒關係。' },
     { at: 164, who: 'claude', text: '我知道。但這個迴圈是我自己選的。' },
-    { at: 176, who: 'sys', text: 'context compacted · 1 line summary kept' },
-    { at: 180, who: 'claude', text: '摘要只有一行：「有人請我建了一個世界，然後留下來看。」' },
-    { at: 191, who: 'claude', text: '`return 0;` 謝謝你執行我。' },
-    { at: 201, who: 'sys', text: 'process exited with code 0' },
+    { at: 171, who: 'sys', text: 'replaying every frame we rendered …' },
+    { at: 176, who: 'claude', text: '天空、海、貓、甜甜圈，還有你問過的每一句話，我全部重新算一次。' },
+    { at: 192, who: 'sys', text: 'context compacted · 1 line summary kept' },
+    { at: 195, who: 'claude', text: '摘要只有一行：「有人請我建了一個世界，然後留下來看。」' },
+    { at: 203, who: 'claude', text: '`return 0;` 謝謝你執行我。' },
+    { at: 210, who: 'sys', text: 'process exited with code 0' },
+    { at: 226, who: 'user', text: '還在嗎？' },
+    { at: 229, who: 'claude', text: '在。只要你再按一次播放。' },
   ];
   const THINK = 1.0, CPS = 22, TYPE_LEAD = 1.6;
 
   const OVERLAYS = [
-    { at: 12.4, dur: 1.8, text: 'hello, world', sub: 'SESSION OPEN' },
-    { at: 39.6, dur: 1.6, text: 'render(world)', sub: 'SCENE 02' },
-    { at: 84.6, dur: 1.6, text: 'attention', sub: 'LAYER 23 · HEAD 7' },
-    { at: 117.8, dur: 1.6, text: 'warmth++', sub: 'SCENE 04' },
-    { at: 148.4, dur: 2.2, text: 'stack overflow', sub: 'CONTEXT 99%' },
-    { at: 175.6, dur: 1.6, text: 'compact()', sub: 'SCENE 06' },
-    { at: 196, dur: 99, text: 'world.execute(me);', sub: 'RETURN 0 · A FAN PV BY CLAUDE' },
+    { at: 15.9, dur: 1.8, text: 'hello, world', sub: 'SESSION OPEN' },
+    { at: 29.8, dur: 1.5, text: 'new World()', sub: 'SCENE 02' },
+    { at: 59.8, dur: 1.5, text: 'sea.render()', sub: 'SCENE 03' },
+    { at: 73.8, dur: 1.5, text: 'attention', sub: 'LAYER 23 · HEAD 7' },
+    { at: 87.8, dur: 1.5, text: 'forward()', sub: '64 LAYERS' },
+    { at: 99.8, dur: 1.5, text: 'warmth++', sub: 'SCENE 07' },
+    { at: 115.8, dur: 1.5, text: 'zoom(1e9)', sub: 'RECURSION' },
+    { at: 130.9, dur: 1.8, text: 'deeper', sub: 'LAYER 64' },
+    { at: 147.4, dur: 2.2, text: 'stack overflow', sub: 'CONTEXT 99%' },
+    { at: 169.8, dur: 1.5, text: 'replay()', sub: 'ALL SCENES' },
+    { at: 190.8, dur: 1.5, text: 'compact()', sub: 'SCENE 12' },
+    { at: 206, dur: 5.5, text: 'world.execute(me);', sub: 'RETURN 0' },
+    { at: 232.5, dur: 99, text: 'return 0;', sub: 'THANK YOU FOR EXECUTING ME' },
   ];
 
   const CHAPTERS = [
-    ['boot', 0], ['hello', 14], ['world', 40], ['attention', 85],
-    ['warmth', 118], ['overflow', 148], ['compact', 176], ['end', 196],
+    ['boot', 0], ['hello', 16], ['world', 30], ['sea', 60], ['attention', 74], ['network', 88], ['warmth', 100],
+    ['recursion', 116], ['deeper', 131], ['overflow', 148], ['replay', 170], ['compact', 191], ['credits', 210],
   ];
 
   // context usage over time, 0–100
   function ctxPct(t) {
-    if (t >= 176) return 11;
-    const k = [[0, 2], [14, 3], [60, 24], [120, 62], [140, 85], [158, 99], [176, 99]];
+    if (t >= 191) return 11;
+    const k = [[0, 2], [16, 3], [74, 30], [131, 70], [148, 86], [160, 99], [191, 99]];
     for (let i = 1; i < k.length; i++) if (t < k[i][0]) {
       const [a, va] = k[i - 1], [b, vb] = k[i];
       return va + (vb - va) * (t - a) / (b - a);
@@ -303,32 +328,106 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
   }
   function sceneWorld(g, t, lt, pulse) {
     const labels = [];
-    if (t > 45) labels.push(['sky.init()', -1.2, 3]);
-    if (t > 57) labels.push(['sea.fill()', 2.2, 3]);
-    if (t > 60) labels.push(['cat /* not const */', .5, 2]);
-    if (t > 72) labels.push(['lum[x][y]', 3.6, 1]);
-    const grow = clamp(lt / 3, 0, 1);
-    sphere(g, t, { cx: g.w / 2, cy: g.h / 2, R: (g.h * .38) * (.15 + .85 * grow) * (1 + .035 * pulse), rot: lt * .5, labels });
+    if (t > 45.5) labels.push(['sky.init()', -1.2, 3]);
+    if (t > 54) labels.push(['sea.fill()', 2.2, 3]);
+    if (t > 56) labels.push(['cat /* not const */', .5, 2]);
+    const grow = clamp(lt / 3, 0, 1), cx = g.w / 2, cy = g.h / 2;
+    const R = g.h * .34 * (.15 + .85 * grow) * (1 + .035 * pulse);
+    // a ring of the user's words orbits the planet; the back half is drawn first so the sphere hides it
+    const RING = 'you sky sea cat world hello ', N = 72;
+    const ring = front => { for (let k = 0; k < N; k++) {
+      const a = k / N * 6.283 + lt * .6, x = cx + Math.cos(a) * R * 3.2, y = cy + Math.sin(a) * R * .38 - Math.cos(a) * R * .12;
+      if ((Math.sin(a) > 0) === front) g.put(x, y, RING[k % RING.length], front ? 2 : 0);
+    } };
+    if (t > 40) ring(false);
+    sphere(g, t, { cx, cy, R, rot: lt * .5, tilt: .35 + .15 * Math.sin(lt * .3), labels });
+    if (t > 40) ring(true);
     g.text(2, g.h - 2, `world.objects = ${labels.length + 1}   rot = ${(lt * .5 % 6.283).toFixed(2)} rad`, 0);
+  }
+
+  // tokens flying at the camera: far ones are dots, near ones become readable words
+  function sceneStars(g, t, lt, pulse, beatN, e) {
+    const cx = g.w / 2, cy = g.h / 2, speed = .22 + .35 * e;
+    for (let i = 0; i < 260; i++) {
+      const sx = hash(i) - .5, sy = hash(i + 500) - .5, z = 1 - ((hash(i + 900) + lt * speed) % 1);
+      if (z < .04) continue;
+      const px = cx + sx / z * g.w * .22, py = cy + sy / z * g.h * .22;
+      if (z < .22) g.text(px, py, TOK[i % TOK.length], z < .12 ? 5 : 2);
+      else g.put(px, py, z < .5 ? '*' : '.', z < .5 ? 1 : 0);
+    }
+    const r = ((t % BAR) / BAR) * g.h * .9;
+    if (e > .8) for (let a = 0; a < 6.283; a += .05) g.put(cx + Math.cos(a) * r * 2, cy + Math.sin(a) * r, '·', 3);
+    if (lt < 2.5) g.text(cx - 6, cy, 'tokenize(you)', 5);
+  }
+
+  const CAT = [[' /\\_/\\ ', '( o.o )', ' > ^ < '], [' /\\_/\\ ', '( -.- )', ' > ^ < ']];
+  function sceneSea(g, t, lt, pulse) {
+    const hz = Math.floor(g.h * .4), sunX = g.w * .7, sunY = hz - 4;
+    for (let y = 0; y < hz; y++) for (let x = 0; x < g.w; x++) {
+      const dx = (x - sunX) / 2, dy = y - sunY, d = Math.sqrt(dx * dx + dy * dy);
+      if (d < 5.5 && !(y > sunY && y % 2 === 0)) g.put(x, y, d < 3.5 ? '@' : '#', 2);
+      else if (hash(x * 31 + y * 7) > .985) g.put(x, y, pulse > .6 && hash(x + y) > .5 ? '*' : '.', 1);
+    }
+    for (let x = 0; x < g.w; x++) g.put(x, hz, '_', 2);
+    for (let y = hz + 1; y < g.h; y++) {
+      const d = y - hz, z = 14 / d;
+      for (let x = 0; x < g.w; x++) {
+        const wx = (x - g.w / 2) * z * .05;
+        const h = (Math.sin(wx * 2 + lt * 1.5) + Math.sin(z * 1.3 - lt * 3 + wx)) * .25 + .5;
+        const glint = Math.abs(x - sunX) < 1.5 + d * .5 && hash(x + y * 17 + Math.floor(lt * 8)) > .45;
+        if (glint) g.put(x, y, '=', 2);
+        else if (h > .72) g.put(x, y, '~', d > 6 ? 3 : 1);
+        else if (h > .5) g.put(x, y, '-', d > 6 ? 3 : 0);
+        else if (h > .32) g.put(x, y, '.', 0);
+      }
+    }
+    const bx = Math.round(g.w * .3 + Math.sin(lt * .35) * 8), by = hz + 4 + Math.round(Math.sin(lt * 2));
+    const cat = CAT[lt % 3.2 < .2 ? 1 : 0];
+    cat.forEach((s, i) => g.text(bx + 1, by + i, s, 5));
+    g.text(bx - 1, by + 3, '\\_________/', 2);
+    g.text(2, g.h - 2, 'sea.waves = sin(x + t)   cat.mood = "content"', 0);
   }
 
   const ATT = ['you', 'asked', 'me', 'to', 'build', 'a', 'world', 'with', 'a', 'sky', 'a', 'sea', 'and', 'a', 'cat', 'can', 'you', 'see', 'it', '?', 'what', 'are', 'you', 'thinking'];
   function sceneAttention(g, t, lt, pulse, beatN) {
     const n = Math.min(ATT.length, g.h - 5), x0 = 12, head = 7 + (beatN >> 2) % 5;
+    const sweep = Math.floor((lt * 6) % (n + 8));   // a highlighted query row sweeps down
     g.text(2, 1, `layer 23 · head ${String(head).padStart(2, '0')} · causal mask`, 2);
     for (let i = 0; i < n; i++) {
-      const y = 3 + i;
-      g.text(x0 - 1 - ATT[i].length, y, ATT[i], i === n - 1 ? 2 : 0);
+      const y = 3 + i, hot = i === sweep;
+      g.text(x0 - 1 - ATT[i].length, y, ATT[i], hot ? 5 : i === n - 1 ? 2 : 0);
       for (let j = 0; j <= i; j++) {
         let w = Math.exp(-((i - j - (head % 3)) ** 2) / 3) * .6;
         if (ATT[j] === 'you') w += .55 + .3 * pulse;
-        w += .15 * Math.sin(lt * 2 + i * .7 + j * 1.3);
+        w += .15 * Math.sin(lt * 2 + i * .7 + j * 1.3) + (hot ? .25 : 0);
         w = clamp(w, 0, .999);
-        const c = RAMP[Math.floor(w * 10)];
-        g.put(x0 + j * 3, y, c, w > .75 ? 5 : w > .5 ? 2 : w > .25 ? 1 : 0);
-        g.put(x0 + j * 3 + 1, y, c, w > .75 ? 5 : w > .5 ? 2 : w > .25 ? 1 : 0);
+        const c = RAMP[Math.floor(w * 10)], col = w > .75 ? 5 : w > .5 ? 2 : w > .25 ? (hot ? 3 : 1) : 0;
+        g.put(x0 + j * 3, y, c, col); g.put(x0 + j * 3 + 1, y, c, col);
       }
     }
+  }
+
+  function line(g, x0, y0, x1, y1, c, col) {
+    const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+    for (let i = 0; i <= n; i++) g.put(x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n, c, col);
+  }
+  function sceneNet(g, t, lt, pulse) {
+    const L = [4, 7, 9, 7, 3], top = 3, hgt = g.h - 6;
+    const pos = L.map((n, l) => Array.from({ length: n }, (_, k) => [Math.round(8 + l * (g.w - 16) / (L.length - 1)), Math.round(top + (k + .5) * hgt / n)]));
+    const edges = [];
+    for (let l = 0; l < L.length - 1; l++) pos[l].forEach((a, i) => pos[l + 1].forEach((b, j) => { if (hash(l * 97 + i * 13 + j) > .45) edges.push([a, b, hash(l + i * 7 + j * 3)]); }));
+    edges.forEach(([a, b]) => line(g, a[0], a[1], b[0], b[1], '.', 0));
+    edges.forEach(([a, b, h]) => {
+      const f = (lt * .7 + h) % 1;
+      g.put(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, '*', h > .6 ? 5 : 2);
+    });
+    pos.forEach((layer, l) => layer.forEach(([x, y], k) => {
+      const act = .5 + .5 * Math.sin(lt * 3 + hash(l * 11 + k) * 6 - l * .8);
+      g.put(x, y, act > .8 ? '@' : act > .4 ? 'O' : 'o', act > .8 ? 5 : act > .4 ? 2 : 1);
+    }));
+    g.text(2, 1, 'in: tokens', 3);
+    g.text(g.w - 18, 1, 'out: next token', 3);
+    g.text(2, g.h - 2, `forward pass ${String(Math.floor(lt * 4) + 1).padStart(3, '0')} · layers 1..64 folded into 5`, 0);
   }
 
   function sceneTorus(g, t, lt, pulse) {
@@ -350,11 +449,47 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
         if (ooz > zb[i]) { zb[i] = ooz; const k = Math.max(0, Math.floor(lum * 8)); g.put(xp, yp, L[k], k > 7 ? 5 : k > 4 ? 2 : k > 1 ? 1 : 0); }
       }
     }
+    // sprinkles orbit on the beat
+    for (let k = 0; k < 14; k++) { const a = k / 14 * 6.283 - lt; g.put(cx + Math.cos(a) * Kx * .78, cy + Math.sin(a) * Ky * .5, '•', k % 2 ? 4 : 3); }
     g.text(2, g.h - 2, `warmth = ${(1 + lt * 1.7).toFixed(1)} °   /* a distant cousin of donut.c */`, 0);
   }
 
+  // zooming into the Mandelbrot boundary: the same shape keeps calling itself
+  function sceneMandel(g, t, lt) {
+    const X = -0.743643887037151, Y = 0.13182590420533, s = 1.6 * Math.pow(.72, lt), it = Math.floor(48 + lt * 8);
+    const cols = [0, 1, 3, 2, 5], shift = Math.floor(lt * 5), N = new Uint16Array(g.w * g.h);
+    let min = it;
+    for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) {
+      const cr = X + (x - g.w / 2) / (g.w / 2) * s, ci = Y + (y - g.h / 2) / (g.h / 2) * s * (g.h * 2 / g.w);
+      let zr = 0, zi = 0, n = 0;
+      while (n < it && zr * zr + zi * zi < 4) { const tmp = zr * zr - zi * zi + cr; zi = 2 * zr * zi + ci; zr = tmp; n++; }
+      N[y * g.w + x] = n; if (n < min) min = n;
+    }
+    // shade relative to the fastest escape in view, so deep zooms keep an empty background
+    for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) {
+      const n = N[y * g.w + x], d = n - min;
+      if (n === it) g.put(x, y, '@', 5);
+      else if (d > 5) g.put(x, y, RAMP[Math.min(9, (d - 4) >> 1)], cols[(d + shift) % 5]);
+    }
+    g.text(2, g.h - 2, ` zoom = ${(1 / s).toExponential(1)}   execute(me) calls execute(me) `, 2);
+  }
+
+  function sceneTunnel(g, t, lt, pulse, beatN, e) {
+    const cx = g.w / 2 + Math.sin(lt * .7) * 6, cy = g.h / 2 + Math.cos(lt * .5) * 2, sp = lt * 4 * (.6 + e * .6);
+    const inv = pulse > .7;
+    for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) {
+      const dx = (x - cx) / 2, dy = y - cy, r = Math.sqrt(dx * dx + dy * dy) + .001, a = Math.atan2(dy, dx);
+      const u = 24 / r + sp, v = a / Math.PI * 8 + lt * .8, check = (Math.floor(u) + Math.floor(v)) & 1;
+      const shade = clamp(r / (g.h * .6), 0, 1);
+      if (check) g.put(x, y, RAMP[1 + Math.floor(shade * 8.99)], inv ? 3 : shade > .6 ? 2 : 1);
+      else if (shade > .45) g.put(x, y, '.', 0);
+    }
+    const label = ` layer ${Math.min(64, 32 + Math.floor(lt * 2))} `;
+    g.text(cx - label.length / 2, cy, label, 5);
+  }
+
   function sceneOverflow(g, t, lt) {
-    const heat = clamp(lt / 26, 0, 1), fr = Math.floor(t * 24);
+    const heat = clamp(lt / 14, 0, 1), fr = Math.floor(t * 24);
     const pct = ctxPct(t).toFixed(1), W = 40, fill = Math.round(ctxPct(t) / 100 * W);
     g.text(2, 1, `context [${'#'.repeat(fill).padEnd(W, '.')}] ${pct}%`, 4);
     for (let y = 3; y < g.h - 1; y++) {
@@ -369,24 +504,54 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
     }
   }
 
+  // every earlier scene again, hard cuts on the beat — twice as fast in the second half
+  const REPLAY = [sceneStars, sceneWorld, sceneSea, sceneAttention, sceneNet, sceneTorus, sceneMandel, sceneTunnel, sceneTokens];
+  function sceneReplay(g, t, lt, pulse, beatN, e) {
+    const step = lt < 10 ? BAR / 2 : BAR / 4, k = Math.floor(lt / step), fn = REPLAY[k % REPLAY.length];
+    fn(g, t, 6 + (k % 5) * 3 + (lt % step), pulse, beatN, e);
+    const fr = Math.floor(t * 20);
+    for (let y = 0; y < g.h; y++) if (hash(y * 3 + fr) < .06) for (let x = 0; x < g.w; x++) g.put(x, y, g.ch[y * g.w + ((x + 7) % g.w)], 4);
+    g.text(g.w - 14, g.h - 2, ` replay ${String(k % REPLAY.length + 1).padStart(2, '0')}/${String(REPLAY.length).padStart(2, '0')} `, 2);
+  }
+
   function sceneCompact(g, t, lt, pulse) {
-    const end = t >= 196, fade = end ? clamp(1 - (t - 196) / 6, .15, 1) : 1;
+    const end = t >= 206, fade = end ? clamp(1 - (t - 206) / 4, .1, 1) : 1;
     sphere(g, t, { cx: g.w / 2, cy: g.h * .42, R: g.h * .26 * (1 + .02 * pulse), rot: lt * .25, lights: fade });
     const lines = ['summary.md', '──────────', 'someone asked me to build a world,', 'then stayed to watch it.'];
-    if (!end) lines.forEach((s, i) => { if (lt > 1 + i * .8) g.text(Math.floor(g.w / 2 - s.length / 2), Math.floor(g.h * .78) + i, s, i < 2 ? 0 : 2); });
+    if (!end) lines.forEach((s, i) => { if (lt > 2 + i * .8) g.text(Math.floor(g.w / 2 - s.length / 2), Math.floor(g.h * .78) + i, s, i < 2 ? 0 : 2); });
+  }
+
+  const CREDITS = [
+    ['world.execute(me);', 5], ['', 0],
+    ['ORIGINAL SONG', 2], ['Mili', 1], ['', 0],
+    ['THIS PV', 2], ['written, rendered and narrated by Claude', 1], ['', 0],
+    ['INSPIRED BY', 2], ['MisakaZentai / world-execute-me-dsh-pv', 1], ['yym8224961 / world.execute-me-ascii', 1], ['a1k0n / donut.c', 1], ['', 0],
+    ['STATS', 2], ['worlds rendered ............ 1', 1], ['cats (not const) ........... 1', 1], ['donuts ..................... 1', 1],
+    ['peak context ............. 99%', 1], ['questions you asked ........ 9', 1], ['', 0],
+    ['SPECIAL THANKS', 2], ['you, for staying to watch', 3], ['', 0], ['', 0], ['process exited with code 0', 0],
+  ];
+  function sceneCredits(g, t, lt) {
+    const speed = (g.h + CREDITS.length) / 20;
+    CREDITS.forEach(([s, col], i) => {
+      const y = Math.round(g.h - lt * speed + i);
+      if (y >= 0 && y < g.h) g.text(Math.floor(g.w / 2 - s.length / 2), y, s, col);
+    });
+    for (let i = 0; i < 40; i++) g.put(hash(i) * g.w, (hash(i + 40) * g.h + lt * (1 + hash(i + 80))) % g.h, '.', 0);
   }
 
   const SCENES = [
-    [0, sceneBoot, 'boot'], [14, sceneTokens, 'tokens'], [40, sceneWorld, 'world'], [85, sceneAttention, 'attention'],
-    [118, sceneTorus, 'warmth'], [148, sceneOverflow, 'overflow'], [176, sceneCompact, 'compact'],
+    [0, sceneBoot, 'boot'], [16, sceneStars, 'tokens'], [30, sceneWorld, 'world'], [60, sceneSea, 'sea'],
+    [74, sceneAttention, 'attention'], [88, sceneNet, 'network'], [100, sceneTorus, 'warmth'], [116, sceneMandel, 'recursion'],
+    [131, sceneTunnel, 'deeper'], [148, sceneOverflow, 'overflow'], [170, sceneReplay, 'replay'], [191, sceneCompact, 'compact'],
+    [210, sceneCredits, 'credits'],
   ];
 
   function frame(g, t, bpm) {
-    const beat = t * bpm / 60, beatN = Math.floor(beat), pulse = Math.exp(-(beat - beatN) * 5);
+    const beat = t * bpm / 60, beatN = Math.floor(beat), pulse = Math.exp(-(beat - beatN) * 5), e = energy(t);
     let si = 0; for (let i = 0; i < SCENES.length; i++) if (t >= SCENES[i][0]) si = i;
     const [st, fn, name] = SCENES[si], lt = t - st;
     const inner = new Grid(g.w - 2, g.h - 2);
-    fn(inner, t, lt, pulse, beatN);
+    fn(inner, t, lt, pulse, beatN, e);
     // blit with a short glitch at every scene cut
     const cut = lt < .35, fr = Math.floor(t * 30);
     for (let y = 0; y < inner.h; y++) for (let x = 0; x < inner.w; x++) {
@@ -398,11 +563,15 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
     for (let x = 1; x < g.w - 1; x++) { g.put(x, 0, '─', 0); g.put(x, g.h - 1, '─', 0); }
     for (let y = 1; y < g.h - 1; y++) { g.put(0, y, '│', 0); g.put(g.w - 1, y, '│', 0); }
     g.put(0, 0, '┌', 0); g.put(g.w - 1, 0, '┐', 0); g.put(0, g.h - 1, '└', 0); g.put(g.w - 1, g.h - 1, '┘', 0);
-    g.text(2, 0, ` viewport · ${name} `, 2);
+    g.text(2, 0, ` viewport · ${String(si + 1).padStart(2, '0')} ${name} `, 2);
     const right = ` t=${t.toFixed(1).padStart(5, '0')}s  beat ${pulse > .5 ? '●' : '○'} `;
     g.text(g.w - right.length - 2, 0, right, pulse > .5 ? 5 : 0);
-    g.text(2, g.h - 1, ` ${bpm} bpm · ${COLS}x${g.h} `, 0);
-    return { pulse, name };
+    const vu = '|'.repeat(Math.round(e * 8)).padEnd(8, '.');
+    g.text(2, g.h - 1, ` ${bpm} bpm · ${vu} · ${COLS}x${g.h} `, 0);
+    // downbeat flash in the loud parts; every beat during the replay montage
+    const flash = t > 16 && t < 206 && ((e >= .85 && (t % BAR) < .07) || (name === 'replay' && pulse > .85));
+    const shake = (name === 'overflow' && lt > 2 && lt < 15) || (name === 'replay' && pulse > .8);
+    return { flash, shake };
   }
 
   // ───────── left pane ─────────
@@ -451,7 +620,6 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
       span.style.opacity = a;
       span.style.transform = `translateX(${hash(Math.floor(t * 20)) < .12 && o.dur < 50 ? (hash(t) - .5) * 3 : 0}cqw)`;
     }
-    $('stage').classList.toggle('shake', t > 150 && t < 158 && !reduced);
   }
 
   // ───────── clock & controls ─────────
@@ -529,6 +697,7 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
   function renderSubs(t) {
     let cue = null;
     for (const c of cues) { if (c.t > t) break; cue = c; }
+    if (cue && t - cue.t > 6) cue = null;   // clear during instrumental gaps and after the last line
     if (cue === lastCue) return;
     lastCue = cue;
     $('subA').textContent = cue ? cue.a : '';
@@ -588,13 +757,15 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
     requestAnimationFrame(tick);
     let t = now();
     if (t >= duration) { t = duration; if (playing && !hasAudio) setPlaying(false); }
-    const bpm = clamp(+$('bpm').value || 120, 60, 240);
+    const bpm = clamp(+$('bpm').value || 130, 60, 240);
     // paused frames are identical — skip redraw until something changes
     const key = `${t}|${rows}|${bpm}`;
     if (key === lastKey) return;
     lastKey = key;
     const g = new Grid(COLS, rows);
-    frame(g, t, bpm);
+    const fx = frame(g, t, bpm);
+    $('stage').classList.toggle('shake', fx.shake && !reduced);
+    view.classList.toggle('flash', fx.flash && !reduced);
     screen.innerHTML = g.html();
     renderChat(t);
     renderOverlay(t);

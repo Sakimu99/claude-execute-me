@@ -19,13 +19,20 @@
 | 時間 | 章節 | 畫面 |
 |---|---|---|
 | 0:00 | boot | 開機日誌、權重載入 |
-| 0:14 | hello | token 流 |
-| 0:40 | world | 旋轉的 ASCII 地球 |
-| 1:25 | attention | attention 矩陣 |
-| 1:58 | warmth | 甜甜圈（向 donut.c 致敬） |
+| 0:16 | hello | 迎面飛來的 token 星空 |
+| 0:30 | world | 旋轉的 ASCII 地球和文字星環 |
+| 1:00 | sea | 海面、夕陽，船上的貓 |
+| 1:14 | attention | attention 矩陣 |
+| 1:28 | network | 神經網路前向傳播 |
+| 1:40 | warmth | 甜甜圈（向 donut.c 致敬） |
+| 1:56 | recursion | Mandelbrot 碎形無限放大 |
+| 2:11 | deeper | 往第 64 層下潛的隧道 |
 | 2:28 | overflow | context 爆滿、遞迴溢位 |
-| 2:56 | compact | context 壓縮 |
-| 3:16 | end | `return 0;` |
+| 2:50 | replay | 所有場景跟著節拍快剪回放 |
+| 3:11 | compact | context 壓縮 |
+| 3:30 | credits | 片尾名單 |
+
+場景切換對齊 130 BPM 的小節線。畫面晃動、閃光和星環的強弱，由一條內建的響度曲線控制。這條曲線只記錄每 2 秒一個 0～9 的數值，不含任何音訊。
 
 ## 操作
 
