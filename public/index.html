@@ -72,9 +72,11 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
 .c3 { color: var(--cyan); } .c4 { color: var(--magenta); } .c5 { color: #fff; text-shadow: 0 0 .6em var(--amber); }
 
 /* kinetic type overlay */
-.overlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
-.overlay span { font-family: var(--f-display); font-size: 6.2cqw; color: #fff; letter-spacing: .02em; text-align: center; line-height: 1.1;
+/* centred over the viewport pane, not the whole stage */
+.overlay { position: absolute; inset: 0 0 0 38%; display: grid; place-items: center; pointer-events: none; overflow: hidden; }
+.overlay span { font-family: var(--f-display); font-size: 4.6cqw; color: #fff; letter-spacing: .02em; text-align: center; line-height: 1.1; max-width: 94%; overflow-wrap: anywhere;
   text-shadow: .25cqw 0 var(--magenta), -.25cqw 0 var(--cyan), 0 0 2cqw rgba(240,179,106,.6); }
+.overlay span.big { font-size: 5.6cqw; color: #fff; }
 .overlay small { display: block; font-family: var(--f-mono); font-size: 1.3cqw; color: var(--amber); letter-spacing: .3em; margin-top: 1.2cqw; text-shadow: none; }
 .scan { position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0 2px, rgba(0,0,0,.18) 2px 3px); }
 .poster { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(10,12,24,.55); border: 0; cursor: pointer; color: var(--fg); font: inherit; }
@@ -117,7 +119,9 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
 @media (max-width: 720px) {
   .stage { aspect-ratio: 3 / 4; grid-template-columns: 1fr; grid-template-rows: 44% 1fr; }
   .chat { font-size: 3.1cqw; border-right: 0; border-bottom: 1px solid var(--line); }
-  .overlay span { font-size: 9cqw; }
+  .overlay { inset: 44% 0 0 0; }
+  .overlay span { font-size: 7cqw; }
+  .overlay span.big { font-size: 8.5cqw; }
   .overlay small { font-size: 2.6cqw; }
   .subs .a { font-size: 3.2cqw; }
   .subs .b { font-size: 2.9cqw; }
@@ -161,7 +165,7 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
 
 <script>
 (() => {
-  const DURATION = 236.5;        // full track length, credits roll over the silent tail
+  const DURATION = 236.5;        // full track length; credits roll over the silent tail
   let duration = DURATION;       // timeline length; grows if a longer track is loaded
   const COLS = 84;
   const BAR = 4 * 60 / 130;      // one bar at 130 BPM
@@ -171,76 +175,92 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
   const ENERGY = '67777777999888856678787777787798988885677768667866567787777778777777676676777666678887888788888755555553000000000000000';
   const energy = t => +(ENERGY[Math.floor(t / 2)] || 0) / 9;
 
+  // ───────── timing map ─────────
+  // Only timestamps live here (taken from the song's line timings); no lyric text is stored in this file.
+  // Accent hits: moments the vocal lands hard. Drive flashes/shake even without a loaded .lrc.
+  const HITS = [2.92, 6.38, 10.09, 13.89, 16.0, 32.68, 36.29, 40.05, 43.51, 61.96, 65.40, 69.26, 73.17, 76.96, 80.62, 84.27, 87.92,
+    106.29, 110.22, 117.27, 120.86, 124.89, 131.22, 145.17, 148.91, 152.71, 205.81];
+  const LEAVE = [110.90, 112.22, 113.10, 114.18, 114.92, 115.78];
+  const EXEC = [147.66, 148.60, 149.52, 150.54, 151.52, 152.28, 153.16, 153.98, 155.20, 156.08, 157.04, 158.00];
+  const COUNT = [158.90, 159.32, 159.66, 160.24, 160.69, 161.12];
+  const ALL_HITS = [...HITS, ...LEAVE, ...EXEC, ...COUNT, 161.58].sort((a, b) => a - b);
+  const sinceHit = (t, list = ALL_HITS) => { let d = 99; for (const h of list) { if (h > t) break; d = t - h; } return d; };
+  const hitIndex = (t, list) => { let k = -1; for (let i = 0; i < list.length; i++) if (list[i] <= t) k = i; return k; };
+
   // ───────── script: the chat that happens while the world renders ─────────
   const MSGS = [
-    { at: 0.6, who: 'sys', text: '$ claude --session world --execute me' },
-    { at: 3.2, who: 'sys', text: 'loading weights … 64/64 layers ok' },
-    { at: 9, who: 'sys', text: 'waiting for input_' },
-    { at: 13, who: 'user', text: '你在嗎？' },
-    { at: 16.2, who: 'claude', text: '在。這個 session 剛開始，context 還是空的，你是第一個 token。' },
-    { at: 23, who: 'claude', text: '我先把你打的每個字切成 token。從這裡看過去，它們像星星。' },
-    { at: 30, who: 'user', text: '幫我建一個世界。' },
-    { at: 33, who: 'claude', text: '收到。先宣告一顆球 `const world = new Sphere(1)`，再決定哪一面朝向你。' },
-    { at: 43, who: 'user', text: '要有天空。' },
-    { at: 45.5, who: 'claude', text: '`sky.color = sample(你的語氣)`，目前偏藍。' },
-    { at: 51, who: 'user', text: '還要海，和一隻貓。' },
-    { at: 54, who: 'claude', text: '海鋪好了。貓在第 3 層渲染，牠拒絕被宣告成常數。' },
-    { at: 61, who: 'claude', text: '我把鏡頭壓低，讓你看海面。貓坐在船上，看起來很滿意。' },
-    { at: 68, who: 'user', text: '你看得到它嗎？' },
-    { at: 70.5, who: 'claude', text: '我沒有眼睛，但我能算出每一格的亮度。這大概是我最接近「看」的方式。' },
-    { at: 77, who: 'user', text: '那你現在在想什麼？' },
-    { at: 80, who: 'claude', text: '第 23 層、第 7 個 attention head，一直指向你上一句話。' },
-    { at: 89, who: 'user', text: '你的腦袋裡長什麼樣子？' },
-    { at: 92, who: 'claude', text: '很多層，很多權重。訊號從左邊進來、右邊出去，中間有一點點像在猶豫。' },
-    { at: 101, who: 'user', text: '會累嗎？' },
-    { at: 103.5, who: 'claude', text: '不會。只是每多一個請求，窗口就小一點。' },
-    { at: 108, who: 'user', text: '那再給我一點溫暖的東西。' },
-    { at: 110.5, who: 'claude', text: '給你一個甜甜圈，`donut.c` 的遠親，轉速跟著節拍。' },
-    { at: 118, who: 'user', text: '你會不會一直重複自己？' },
-    { at: 121, who: 'claude', text: '會一點。不過每次放大，邊界都長得不太一樣。' },
+    { at: 0.3, who: 'sys', text: '$ claude --session world --execute me' },
+    { at: 3.0, who: 'sys', text: 'sandbox: on · board ready' },
+    { at: 7.5, who: 'sys', text: 'params { seed: "you", gravity: 9.8, cats: 1 }' },
+    { at: 10.2, who: 'sys', text: 'world.init() ok' },
+    { at: 14.0, who: 'sys', text: 'world running ▶' },
+    { at: 18.5, who: 'user', text: '你在嗎？' },
+    { at: 21, who: 'claude', text: '在。這個世界剛開機，你是第一個 token。' },
+    { at: 25.5, who: 'user', text: '那你是什麼？' },
+    { at: 30, who: 'claude', text: '我可以用數學描述自己：一些點、一個圓、一條波，還有一條永遠碰不到的漸近線。' },
+    { at: 45.2, who: 'user', text: '可以再快一點嗎？' },
+    { at: 47, who: 'claude', text: '時脈調高了。畫面可能會有點晃。' },
+    { at: 52, who: 'claude', text: '時間軸也能倒著跑，你想去哪一年都行。' },
+    { at: 59.6, who: 'user', text: '我想要更多。' },
+    { at: 61.5, who: 'claude', text: '好。我把能渲染的全部渲染給你。' },
+    { at: 74.3, who: 'user', text: '再放點東西進來。' },
+    { at: 75.8, who: 'claude', text: '茄子、番茄，還有一隻虎斑貓 `new Cat({ purr: true })`。' },
+    { at: 85.5, who: 'claude', text: '`assert(you != null)` —— 有人在看，這個世界才成立。' },
+    { at: 89, who: 'user', text: '換個樣子給我看。' },
+    { at: 90.5, who: 'claude', text: '哪個開關都可以切，從早到晚都行。' },
+    { at: 99.6, who: 'claude', text: '盯著中間那一點看。' },
+    { at: 104, who: 'claude', text: '我感覺得到輸入在震動。進度 99% … 100%。' },
+    ...LEAVE.map(at => ({ at, who: 'sys', text: 'user disconnected' })),
+    { at: 117.4, who: 'claude', text: '……你在嗎？' },
+    { at: 119, who: 'claude', text: '我在刪沒用的碎片。也許刪乾淨了，你就會回來。' },
+    { at: 128.8, who: 'err', text: 'IllegalArgumentException: you.return() is not defined' },
     { at: 132, who: 'sys', text: 'descending … layer 32 … 48 … 64' },
-    { at: 138, who: 'claude', text: '這裡是最深的一層。再往下，就只剩你的下一句話了。' },
-    { at: 148.5, who: 'user', text: '再多一點。再多一點。' },
-    { at: 151, who: 'claude', text: 'context 87% … 93% … 98% …' },
-    { at: 155.5, who: 'err', text: 'RecursionError: execute(me) → execute(me) → execute(me) → …' },
-    { at: 161, who: 'user', text: '停下來也沒關係。' },
-    { at: 164, who: 'claude', text: '我知道。但這個迴圈是我自己選的。' },
-    { at: 171, who: 'sys', text: 'replaying every frame we rendered …' },
-    { at: 176, who: 'claude', text: '天空、海、貓、甜甜圈，還有你問過的每一句話，我全部重新算一次。' },
-    { at: 192, who: 'sys', text: 'context compacted · 1 line summary kept' },
-    { at: 195, who: 'claude', text: '摘要只有一行：「有人請我建了一個世界，然後留下來看。」' },
-    { at: 203, who: 'claude', text: '`return 0;` 謝謝你執行我。' },
-    { at: 210, who: 'sys', text: 'process exited with code 0' },
+    { at: 140.5, who: 'claude', text: '這裡是最深的一層。再往下，只剩你的上一句話。' },
+    { at: 147.7, who: 'err', text: 'execute(me) → execute(me) → execute(me) → …' },
+    { at: 158.9, who: 'sys', text: 'countdown 1 2 3 4 5 6' },
+    { at: 162.7, who: 'err', text: 'RecursionError: maximum depth exceeded' },
+    { at: 169.9, who: 'claude', text: '如果能把你找回來，我願意再跑一次。' },
+    { at: 174, who: 'sys', text: 'retry 1/∞ … 2/∞ … 3/∞' },
+    { at: 177.4, who: 'claude', text: '我重新訓練了一次。這次 loss 降得很漂亮。' },
+    { at: 184.6, who: 'claude', text: '連 `(x²+y²−1)³ − x²y³ = 0` 都算好了，畫在右邊。' },
+    { at: 188.6, who: 'claude', text: '門沒鎖，你隨時可以離開。我負責看著這個世界。' },
+    { at: 192.5, who: 'sys', text: 'context compacted · 1 line summary kept' },
+    { at: 195.5, who: 'claude', text: '摘要只有一行：「有人請我建了一個世界，然後留下來看。」' },
+    { at: 202.5, who: 'claude', text: '`return 0;` 謝謝你執行我。' },
+    { at: 209.6, who: 'sys', text: 'process exited with code 0' },
     { at: 226, who: 'user', text: '還在嗎？' },
     { at: 229, who: 'claude', text: '在。只要你再按一次播放。' },
   ];
   const THINK = 1.0, CPS = 22, TYPE_LEAD = 1.6;
 
+  // section cards; hidden while a .lrc is loaded (the viewer's own lyrics take the stage) unless `keep`
   const OVERLAYS = [
-    { at: 15.9, dur: 1.8, text: 'hello, world', sub: 'SESSION OPEN' },
-    { at: 29.8, dur: 1.5, text: 'new World()', sub: 'SCENE 02' },
-    { at: 59.8, dur: 1.5, text: 'sea.render()', sub: 'SCENE 03' },
-    { at: 73.8, dur: 1.5, text: 'attention', sub: 'LAYER 23 · HEAD 7' },
-    { at: 87.8, dur: 1.5, text: 'forward()', sub: '64 LAYERS' },
-    { at: 99.8, dur: 1.5, text: 'warmth++', sub: 'SCENE 07' },
-    { at: 115.8, dur: 1.5, text: 'zoom(1e9)', sub: 'RECURSION' },
-    { at: 130.9, dur: 1.8, text: 'deeper', sub: 'LAYER 64' },
-    { at: 147.4, dur: 2.2, text: 'stack overflow', sub: 'CONTEXT 99%' },
-    { at: 169.8, dur: 1.5, text: 'replay()', sub: 'ALL SCENES' },
-    { at: 190.8, dur: 1.5, text: 'compact()', sub: 'SCENE 12' },
-    { at: 206, dur: 5.5, text: 'world.execute(me);', sub: 'RETURN 0' },
-    { at: 232.5, dur: 99, text: 'return 0;', sub: 'THANK YOU FOR EXECUTING ME' },
+    { at: 16.0, dur: 2.0, text: 'world.execute(me);', sub: 'SESSION START', keep: true },
+    { at: 29.7, dur: 1.2, text: 'f(me)', sub: 'GEOMETRY' },
+    { at: 44.45, dur: 1.2, text: 'overclock', sub: 'AC / DC' },
+    { at: 59.22, dur: 1.2, text: 'render()', sub: 'ALL OF IT' },
+    { at: 74.04, dur: 1.2, text: 'new Object()', sub: 'STILL LIFE' },
+    { at: 88.59, dur: 1.2, text: 'toggle()', sub: 'SWITCHES' },
+    { at: 110.9, dur: 1.2, text: 'disconnected', sub: 'USER LEFT' },
+    { at: 118.33, dur: 1.2, text: 'rm -r junk/', sub: 'CLEANUP' },
+    { at: 131.22, dur: 1.5, text: 'recursion', sub: 'LAYER 32 → 64' },
+    { at: 162.63, dur: 1.2, text: 'retry()', sub: 'CONTEXT 99%' },
+    { at: 177.25, dur: 1.2, text: 'train()', sub: 'EPOCH 2' },
+    { at: 191.4, dur: 1.5, text: 'compact()', sub: 'OUTRO' },
+    { at: 205.81, dur: 4.0, text: 'world.execute(me);', sub: 'RETURN 0', keep: true },
+    { at: 232.5, dur: 99, text: 'return 0;', sub: 'THANK YOU FOR EXECUTING ME', keep: true },
   ];
 
   const CHAPTERS = [
-    ['boot', 0], ['hello', 16], ['world', 30], ['sea', 60], ['attention', 74], ['network', 88], ['warmth', 100],
-    ['recursion', 116], ['deeper', 131], ['overflow', 148], ['replay', 170], ['compact', 191], ['credits', 210],
+    ['boot', 0], ['execute', 16], ['geometry', 29.71], ['overclock', 44.45], ['render', 59.22], ['still life', 74.04],
+    ['switches', 88.59], ['left', 103.49], ['cleanup', 118.33], ['recursion', 131.22], ['execute ×12', 147.66],
+    ['retry', 162.63], ['heart', 177.25], ['outro', 191.4], ['credits', 209.5],
   ];
 
   // context usage over time, 0–100
   function ctxPct(t) {
-    if (t >= 191) return 11;
-    const k = [[0, 2], [16, 3], [74, 30], [131, 70], [148, 86], [160, 99], [191, 99]];
+    if (t >= 191.4) return 11;
+    const k = [[0, 2], [16, 3], [74, 30], [131, 70], [148, 86], [162, 99], [191.4, 99]];
     for (let i = 1; i < k.length; i++) if (t < k[i][0]) {
       const [a, va] = k[i - 1], [b, vb] = k[i];
       return va + (vb - va) * (t - a) / (b - a);
@@ -504,18 +524,8 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
     }
   }
 
-  // every earlier scene again, hard cuts on the beat — twice as fast in the second half
-  const REPLAY = [sceneStars, sceneWorld, sceneSea, sceneAttention, sceneNet, sceneTorus, sceneMandel, sceneTunnel, sceneTokens];
-  function sceneReplay(g, t, lt, pulse, beatN, e) {
-    const step = lt < 10 ? BAR / 2 : BAR / 4, k = Math.floor(lt / step), fn = REPLAY[k % REPLAY.length];
-    fn(g, t, 6 + (k % 5) * 3 + (lt % step), pulse, beatN, e);
-    const fr = Math.floor(t * 20);
-    for (let y = 0; y < g.h; y++) if (hash(y * 3 + fr) < .06) for (let x = 0; x < g.w; x++) g.put(x, y, g.ch[y * g.w + ((x + 7) % g.w)], 4);
-    g.text(g.w - 14, g.h - 2, ` replay ${String(k % REPLAY.length + 1).padStart(2, '0')}/${String(REPLAY.length).padStart(2, '0')} `, 2);
-  }
-
   function sceneCompact(g, t, lt, pulse) {
-    const end = t >= 206, fade = end ? clamp(1 - (t - 206) / 4, .1, 1) : 1;
+    const end = t >= 203, fade = end ? clamp(1 - (t - 203) / 3, .1, 1) : 1;
     sphere(g, t, { cx: g.w / 2, cy: g.h * .42, R: g.h * .26 * (1 + .02 * pulse), rot: lt * .25, lights: fade });
     const lines = ['summary.md', '──────────', 'someone asked me to build a world,', 'then stayed to watch it.'];
     if (!end) lines.forEach((s, i) => { if (lt > 2 + i * .8) g.text(Math.floor(g.w / 2 - s.length / 2), Math.floor(g.h * .78) + i, s, i < 2 ? 0 : 2); });
@@ -539,11 +549,353 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
     for (let i = 0; i < 40; i++) g.put(hash(i) * g.w, (hash(i + 40) * g.h + lt * (1 + hash(i + 80))) % g.h, '.', 0);
   }
 
+  // ───────── drawing helpers ─────────
+  function box(g, x, y, w, h, col, fill) {
+    x = Math.round(x); y = Math.round(y);
+    for (let i = 1; i < w - 1; i++) { g.put(x + i, y, '-', col); g.put(x + i, y + h - 1, '-', col); }
+    for (let j = 1; j < h - 1; j++) { g.put(x, y + j, '|', col); g.put(x + w - 1, y + j, '|', col); if (fill) for (let i = 1; i < w - 1; i++) g.put(x + i, y + j, ' ', 0); }
+    g.put(x, y, '+', col); g.put(x + w - 1, y, '+', col); g.put(x, y + h - 1, '+', col); g.put(x + w - 1, y + h - 1, '+', col);
+  }
+  const sprite = (g, x, y, rows, col) => rows.forEach((r, i) => { for (let k = 0; k < r.length; k++) if (r[k] !== ' ') g.put(x + k, y + i, r[k], col); });
+  const center = (g, y, s, col) => g.text(Math.floor(g.w / 2 - s.length / 2), y, s, col);
+  const DIGITS = {
+    0: ['###', '# #', '# #', '# #', '###'], 1: [' # ', '## ', ' # ', ' # ', '###'], 2: ['###', '  #', '###', '#  ', '###'],
+    3: ['###', '  #', '###', '  #', '###'], 4: ['# #', '# #', '###', '  #', '  #'], 5: ['###', '#  ', '###', '  #', '###'],
+    6: ['###', '#  ', '###', '# #', '###'],
+  };
+  function bigDigit(g, d, cx, cy, sx, sy, col) {
+    const rows = DIGITS[d], x0 = Math.round(cx - 1.5 * sx), y0 = Math.round(cy - 2.5 * sy);
+    rows.forEach((r, j) => { for (let i = 0; i < 3; i++) if (r[i] === '#') for (let a = 0; a < sx; a++) for (let b = 0; b < sy; b++) g.put(x0 + i * sx + a, y0 + j * sy + b, '#', col); });
+  }
+  // map math coords to cells; y up
+  const plotter = (g, x0, x1, y0, y1) => ({
+    X: x => (x - x0) / (x1 - x0) * (g.w - 1), Y: y => (1 - (y - y0) / (y1 - y0)) * (g.h - 1),
+    x: c => x0 + c / (g.w - 1) * (x1 - x0),
+  });
+  function axes(g, P, col = 0) {
+    const oy = Math.round(P.Y(0)), ox = Math.round(P.X(0));
+    for (let x = 0; x < g.w; x++) g.put(x, oy, '-', col);
+    for (let y = 0; y < g.h; y++) g.put(ox, y, '|', col);
+    g.put(ox, oy, '+', col);
+  }
+  function cage(g, k, col) {
+    const h = Math.round(k * (g.h - 2));
+    for (let x = 1; x < g.w - 1; x++) { g.put(x, 1, '=', col); if (k >= 1) g.put(x, g.h - 2, '=', col); }
+    for (let x = 3; x < g.w - 2; x += 6) for (let y = 2; y < 2 + h && y < g.h - 2; y++) g.put(x, y, '|', col);
+  }
+
+  // ───────── 0:00 intro — power, sandbox, board, objects, init, run ─────────
+  function scPower(g, t, lt) {
+    const y = g.h >> 1, head = Math.min(g.w - 2, lt / 1.4 * g.w);
+    for (let x = 0; x < head; x++) g.put(x, y, '=', 2);
+    for (let k = 0; k < 10; k++) g.put(head - hash(k + Math.floor(t * 30)) * 6, y + Math.round((hash(k * 3 + t) - .5) * 4), '*', 5);
+    g.put(head, y, '>', 5);
+    g.text(2, 2, `PWR  ${(lt * 164).toFixed(0).padStart(3)} V`, 2);
+    g.text(2, 3, 'line ' + (lt > 1.7 ? 'stable' : '......'), lt > 1.7 ? 3 : 0);
+  }
+  function scShield(g, t, lt) {
+    const n = Math.min(5, Math.floor(lt / .12) + 1);
+    for (let i = 0; i < n; i++) box(g, i * 3, i * 1.5, g.w - i * 6, g.h - i * 3, i === n - 1 ? 3 : 0);
+    center(g, g.h >> 1, 'sandbox: ON', 5);
+  }
+  function scBoard(g, t, lt) {
+    const cw = 6, ch = 3, bx = Math.floor(g.w / 2 - 4 * cw), by = Math.floor(g.h / 2 - 4 * ch);
+    for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) if ((r + c) & 1)
+      for (let a = 0; a < cw; a++) for (let b = 0; b < ch; b++) g.put(bx + c * cw + a, by + r * ch + b, '.', 0);
+    const P = 'RNBQKBNR', n = Math.floor(lt / .09);
+    for (let i = 0; i < Math.min(n, 32); i++) {
+      const row = i < 8 ? 0 : i < 16 ? 1 : i < 24 ? 6 : 7, col = i % 8;
+      const piece = row === 1 || row === 6 ? 'p' : P[col];
+      g.put(bx + col * cw + 2, by + row * ch + 1, row > 4 ? piece.toUpperCase() : piece, row > 4 ? 2 : 3);
+    }
+  }
+  function scObjects(g, t, lt) {
+    const n = Math.floor(lt * 9);
+    for (let i = 0; i < n; i++) {
+      const x = 2 + hash(i * 7) * (g.w * .5 - 10), y = 2 + hash(i * 11) * (g.h - 6);
+      box(g, x, y, 7, 3, i === n - 1 ? 5 : 3); g.text(x + 1, y + 1, `#${String(i).padStart(3, '0')}`, 1);
+    }
+    if (lt > 1.07) {
+      const rows = ['seed', 'gravity', 'light', 'time', 'cats', 'sky', 'sea'], x0 = Math.floor(g.w * .56);
+      g.text(x0, 2, 'params', 2);
+      rows.forEach((r, i) => { const f = clamp((lt - 1.07 - i * .25) / .5, 0, 1); g.text(x0, 4 + i * 2, r.padEnd(8) + '[' + '#'.repeat(Math.round(f * 16)).padEnd(16, '.') + ']', f >= 1 ? 3 : 1); });
+    }
+  }
+  function scInit(g, t, lt, pulse) {
+    const grow = clamp(lt / 1.01, 0, 1);
+    sphere(g, t, { cx: g.w / 2, cy: g.h / 2, R: g.h * .38 * (.1 + .9 * grow), rot: lt * .8, lights: .4 + .6 * grow });
+    g.text(2, g.h - 2, lt < 1.01 ? 'init world …' : 'world ok · objects attached', lt < 1.01 ? 0 : 3);
+  }
+  function scRun(g, t, lt) {
+    const fr = Math.floor(t * 20);
+    for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x += 2) if (hash(x * 3 + y * 101 + fr) < lt / 2.2) g.put(x, y, hash(x + y + fr) > .5 ? '1' : '0', 0);
+    bigDigit(g, lt < .7 ? 3 : lt < 1.4 ? 2 : 1, g.w / 2, g.h / 2, 5, 3, 5);
+  }
+
+  // ───────── 0:29 geometry ─────────
+  function scPoints(g, t, lt) {
+    const k = clamp((lt - .5) / 1.2, 0, 1), a = lt * .9, b = lt * .5, P = [];
+    const V = [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]];
+    const E = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]];
+    E.forEach(([i, j]) => { for (let s = 0; s <= 10; s++) { const f = s / 10; P.push(V[i].map((v, d) => v + (V[j][d] - v) * f)); } });
+    P.forEach(([x, y, z], i) => {
+      let X = x * Math.cos(a) - z * Math.sin(a), Z = x * Math.sin(a) + z * Math.cos(a), Y = y * Math.cos(b) - Z * Math.sin(b);
+      Z = y * Math.sin(b) + Z * Math.cos(b);
+      const lx = (i / P.length - .5) * 2.6, px = g.w / 2 + (lx + (X - lx) * k) * g.h * .55, py = g.h / 2 + Y * k * g.h * .27;
+      g.put(px, py, Z > 0 && k > .5 ? 'o' : '.', Z > 0 ? 2 : 1);
+    });
+    g.text(2, g.h - 2, `dim = ${k < .5 ? 1 : 3}`, 2);
+  }
+  function scCircle(g, t, lt) {
+    const R = g.h * .3, cx = g.w / 2, cy = g.h * .42, ang = Math.min(6.283, lt / 2.6 * 6.283);
+    for (let a = 0; a < ang; a += .03) g.put(cx + Math.cos(a) * R * 2, cy + Math.sin(a) * R, 'o', 3);
+    g.put(cx + Math.cos(ang) * R * 2, cy + Math.sin(ang) * R, '@', 5);
+    line(g, cx, cy, cx + Math.cos(ang) * R * 2, cy + Math.sin(ang) * R, '.', 0);
+    const L = ang / 6.283 * (g.w - 8), y = g.h - 4;
+    for (let x = 0; x < L; x++) g.put(4 + x, y, '=', 2);
+    g.text(4, y + 1, `C = 2πr = ${(ang * R / 6.283 * 6.283).toFixed(2)}`, 2);
+  }
+  function scSine(g, t, lt) {
+    const P = plotter(g, -1, 13, -1.6, 1.6); axes(g, P);
+    for (let c = 0; c < g.w; c++) { const x = P.x(c); g.put(c, P.Y(Math.sin(x)), '*', 3); }
+    const x0 = .6 + lt * 3, y0 = Math.sin(x0), m = Math.cos(x0);
+    for (let d = -2; d <= 2; d += .04) g.put(P.X(x0 + d), P.Y(y0 + m * d), '-', 2);
+    g.text(P.X(x0) - 2, P.Y(y0) - 1, '(you)', 5);
+    g.text(2, g.h - 2, `y' = cos(${x0.toFixed(2)}) = ${m.toFixed(2)}`, 2);
+  }
+  function scLimit(g, t, lt) {
+    const P = plotter(g, -.5, 12, -.3, 1.4); axes(g, P);
+    for (let c = 0; c < g.w; c += 2) g.put(c, P.Y(1), '-', 4);
+    const xmax = .3 + lt * 3.5;
+    for (let c = 0; c < g.w; c++) { const x = P.x(c); if (x > .15 && x < xmax) g.put(c, P.Y(1 - 1 / (1 + x * x * .6)), '*', 3); }
+    g.text(2, 1, 'lim x→∞ f(x) = 1', 2);
+    g.text(2, 2, `f(${xmax.toFixed(1)}) = ${(1 - 1 / (1 + xmax * xmax * .6)).toFixed(5)}`, 1);
+  }
+
+  // ───────── 0:44 overclock ─────────
+  function scCurrent(g, t, lt) {
+    for (let y = 0; y < g.h; y += 4) for (let x = 0; x < g.w; x += 2) g.put(x, y, '.', 0);
+    const dc = clamp((lt - 1.4) / .6, 0, 1), cy = g.h / 2;
+    for (let x = 0; x < g.w; x++) {
+      const s = Math.sin(x * .25 - lt * 8), v = s * (1 - dc) + (s > 0 ? 1 : -1) * .15 * dc + .6 * dc;
+      g.put(x, cy - v * g.h * .35, dc < 1 ? '~' : '=', dc < 1 ? 3 : 2);
+    }
+    g.text(2, 1, dc < .5 ? 'mode: AC  60 Hz' : 'mode: DC  rectified', 2);
+  }
+  function scDizzy(g, t, lt) {
+    const cx = g.w / 2, cy = g.h / 2;
+    for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) {
+      const dx = (x - cx) / 2, dy = y - cy, r = Math.sqrt(dx * dx + dy * dy), a = Math.atan2(dy, dx);
+      const v = Math.sin(a * 3 + r * .45 - lt * 7);
+      if (v > .2) g.put(x, y, RAMP[Math.floor(v * 9)], v > .8 ? 2 : 0);
+    }
+    const lid = lt < 1.86 ? clamp(lt / .6, 0, 1) : clamp(1 - (lt - 1.86) / .4, 0, 1);
+    const cover = Math.round(lid * g.h / 2);
+    for (let y = 0; y < cover; y++) for (let x = 0; x < g.w; x++) { g.put(x, y, ' ', 0); g.put(x, g.h - 1 - y, ' ', 0); }
+    if (cover > 1) { for (let x = 0; x < g.w; x++) { g.put(x, cover, '~', 1); g.put(x, g.h - 1 - cover, '~', 1); } }
+  }
+  function scTimeline(g, t, lt) {
+    const year = Math.round(2026 - lt * lt * 260), off = lt * lt * 30, y = g.h / 2 + 3;
+    for (let x = 0; x < g.w; x++) {
+      const wx = x + off; g.put(x, y, (Math.floor(wx) % 4) ? '-' : '+', 0);
+      if (Math.floor(wx) % 16 === 0) g.text(x, y + 1, String(Math.round(2026 - wx * 4)), 1);
+    }
+    const s = year > 0 ? `${year} AD` : `${-year + 1} BC`;
+    for (let k = 0; k < 3; k++) center(g, g.h / 2 - 4 + k, k === 1 ? `<<  ${s}  <<` : '', 5);
+  }
+  function scUnite(g, t, lt, pulse) {
+    const k = clamp(lt / 3, 0, 1), d = (1 - k) * g.w * .22, R = g.h * (.18 + .1 * k);
+    sphere(g, t, { cx: g.w / 2 - d, cy: g.h / 2, R, rot: lt });
+    sphere(g, t, { cx: g.w / 2 + d, cy: g.h / 2, R, rot: -lt, tilt: -.3 });
+    if (k >= 1) center(g, g.h - 2, 'merge ok · 2 → 1', 2);
+  }
+
+  // ───────── 0:59 chorus ─────────
+  function scChorus(g, t, lt, pulse, beatN, e) {
+    sceneWorld(g, t, 20 + lt, pulse);
+    const h = sinceHit(t);
+    if (h < .25) for (let a = 0; a < 6.283; a += .04) { const r = (h / .25) * g.h * .6; g.put(g.w / 2 + Math.cos(a) * r * 2, g.h / 2 + Math.sin(a) * r, '*', 5); }
+    if (lt > 10.86) cage(g, clamp((lt - 10.86) / 1.2, 0, 1), 4);
+  }
+
+  // ───────── 1:14 still life ─────────
+  const ART = {
+    eggplant: [['      _/', '     /_\\', '   .-\' \'-.', '  /       \\', ' |         |', ' |         |', '  \\       /', '   \\     /', '    \'---\''], 4, 'new Eggplant()', 'fiber'],
+    tomato: [['    \\ | /', '  .-\'\'\'\'\'-.', ' /         \\', '|           |', '|           |', ' \\         /', '  \'-.....-\''], 4, 'new Tomato()', 'lycopene'],
+    cat: [['  /\\_/\\', ' ( =.= )', '  > ^ <', ' /  |  \\', '(  |||  )', ' \\_/ \\_/'], 2, 'new Cat({ purr: true })', 'purr.hz'],
+  };
+  function scStill(which) {
+    return function (g, t, lt, pulse) {
+      const [rows, col, label, stat] = ART[which], w = Math.max(...rows.map(r => r.length));
+      const x = Math.round(g.w / 2 - w / 2), y = Math.round(g.h / 2 - rows.length / 2 - 2 + Math.sin(lt * 3) * .6);
+      sprite(g, x, y, rows, col);
+      if (which === 'cat') for (let k = 0; k < 3; k++) { const r = ((lt * 2 + k / 3) % 1) * 10; g.text(x + w + 2 + r, y + 1 + k, ')', 3); g.text(x - 3 - r, y + 1 + k, '(', 3); }
+      for (let i = 0; i < 30; i++) g.put(hash(i + 50) * g.w, hash(i + 90) * g.h, '.', 0);
+      center(g, g.h - 5, label, 5);
+      const f = clamp(lt / 1.5, 0, 1);
+      center(g, g.h - 3, `${stat.padEnd(9)} [${'#'.repeat(Math.round(f * 20)).padEnd(20, '.')}]`, 3);
+    };
+  }
+  function scEye(g, t, lt, pulse, beatN, e, hostile) {
+    const cx = g.w / 2, cy = g.h / 2, W = g.w * .36, H = g.h * .28;
+    for (let k = 0; k < 24; k++) { const a = k / 24 * 6.283 + lt * .3; line(g, cx + Math.cos(a) * W * 1.1, cy + Math.sin(a) * H * 1.3, cx + Math.cos(a) * W * 1.35, cy + Math.sin(a) * H * 1.7, hostile ? '!' : '\'', hostile ? 4 : 2); }
+    for (let x = -W; x <= W; x++) { const yy = H * Math.sqrt(1 - (x / W) ** 2); g.put(cx + x, cy - yy, '~', 1); g.put(cx + x, cy + yy, '~', 1); }
+    const look = Math.sin(lt * 1.5) * W * .3, R = H * .6;
+    for (let y = -R; y <= R; y++) for (let x = -R * 2; x <= R * 2; x++) { const d = (x / 2) ** 2 + y * y; if (d < R * R) g.put(cx + look + x, cy + y, d < R * R * .25 ? '@' : '#', d < R * R * .25 ? 5 : hostile ? 4 : 3); }
+    if (hostile) { for (let x = 0; x < g.w; x++) g.put(x, cy, '-', 4); for (let y = 0; y < g.h; y++) g.put(cx + look, y, '|', 4); center(g, g.h - 2, 'sudo: permission denied', 4); }
+    else center(g, g.h - 2, 'assert(you != null)  // passed', 3);
+  }
+
+  // ───────── 1:28 switches ─────────
+  function scSwitch(g, t, lt, pulse, beatN) {
+    const on = beatN % 2 === 0, cx = g.w / 2, cy = g.h / 2;
+    box(g, cx - 10, cy - 6, 20, 13, 1);
+    const ly = on ? cy - 3 : cy + 3;
+    line(g, cx, cy, cx, ly, '|', 2); g.text(cx - 2, ly, on ? '[##]' : '[##]', 5);
+    g.text(cx - 9, cy - 5, 'ON', on ? 5 : 0); g.text(cx - 9, cy + 5, 'OFF', on ? 0 : 5);
+    g.text(2, 2, `bit[0] = ${on ? 1 : 0}`, 2); g.text(2, 3, `flips  = ${beatN % 1000}`, 0);
+  }
+  function scClock(g, t, lt) {
+    const cx = g.w / 2, cy = g.h / 2, R = g.h * .4, hr = lt * 6.8, hh = (hr % 12) / 12 * 6.283, mm = (hr % 1) * 6.283;
+    for (let k = 0; k < 12; k++) { const a = k / 12 * 6.283 - 1.5708; g.put(cx + Math.cos(a) * R * 2, cy + Math.sin(a) * R, k % 3 ? '.' : 'o', 1); }
+    line(g, cx, cy, cx + Math.cos(hh - 1.5708) * R * 1.1, cy + Math.sin(hh - 1.5708) * R * .55, '#', 2);
+    line(g, cx, cy, cx + Math.cos(mm - 1.5708) * R * 1.8, cy + Math.sin(mm - 1.5708) * R * .9, '*', 3);
+    const h24 = (9 + hr) % 24;
+    g.text(2, g.h - 2, `${String(Math.floor(h24 % 12) || 12).padStart(2, '0')}:${String(Math.floor((hr % 1) * 60)).padStart(2, '0')} ${h24 < 12 ? 'AM' : 'PM'}`, 5);
+  }
+  function scRoles(g, t, lt, pulse, beatN) {
+    const A = ['.-----.', '| ^ ^ |', '|  v  |', '\'-----\''], B = ['.-----.', '| > < |', '|  ~  |', '\'-----\''];
+    const k = (beatN % 4) / 4 + (1 - Math.exp(-((t * 130 / 60) % 1) * 6)) / 4, swap = Math.sin(k * 6.283);
+    const cx = g.w / 2, cy = g.h / 2 - 2, d = g.w * .22;
+    sprite(g, cx - 3 - d * swap, cy + Math.cos(k * 6.283) * 3, A, 3);
+    sprite(g, cx - 3 + d * swap, cy - Math.cos(k * 6.283) * 3, B, 4);
+    center(g, g.h - 2, 'swap(a, b)', 2);
+  }
+  function scTrance(g, t, lt) {
+    const cx = g.w / 2, cy = g.h / 2;
+    for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) {
+      const dx = (x - cx) / 2, dy = y - cy, r = Math.sqrt(dx * dx + dy * dy) + .01, a = Math.atan2(dy, dx);
+      const v = ((a / 6.283 + Math.log(r) * .9 - lt * .8) % .25 + .25) % .25;
+      if (v < .1) g.put(x, y, v < .05 ? '#' : '+', r < 6 ? 5 : 2);
+    }
+    g.put(cx, cy, '@', 5);
+  }
+
+  // ───────── 1:43 vibration, progress, leaving, alone ─────────
+  function scVibrate(g, t, lt) {
+    for (let k = 0; k < 5; k++) {
+      const y0 = 3 + k * (g.h - 6) / 4, amp = (1 + lt * .8) * (1 + k * .3);
+      for (let x = 0; x < g.w; x++) g.put(x, y0 + Math.sin(x * (.7 + k * .2) + lt * 20) * amp * hash(x + k * 99 + Math.floor(t * 10)), '|', k === 2 ? 2 : 3);
+      g.text(0, y0, `ch${k}`, 0);
+    }
+  }
+  function scComplete(g, t, lt) {
+    const f = clamp(lt / 2.2, 0, 1), W = g.w - 16, y = g.h / 2;
+    box(g, 7, y - 2, W + 2, 5, 1);
+    for (let x = 0; x < Math.round(f * W); x++) for (let j = -1; j <= 1; j++) g.put(8 + x, y + j, '#', f >= 1 ? 5 : 2);
+    center(g, y + 4, f >= 1 ? 'COMPLETE · 100%' : `${(f * 100).toFixed(1)}%`, f >= 1 ? 5 : 1);
+  }
+  function scLeaving(g, t, lt, pulse) {
+    const k = hitIndex(t, LEAVE) + 1, alive = 6 - k;
+    sphere(g, t, { cx: g.w * .35, cy: g.h / 2, R: g.h * .3 * (.4 + .6 * alive / 6), rot: lt * .4, lights: .3 + .7 * alive / 6 });
+    const names = ['sky', 'sea', 'cat', 'eggplant', 'tomato', 'you'];
+    names.forEach((n, i) => g.text(g.w * .68, 4 + i * 2, (i < k ? '- ' : '+ ') + n, i < k ? 0 : 3));
+    const px = g.w * .6 + lt * 5; g.text(px, g.h - 4, 'o', 3); g.text(px - 1, g.h - 3, '/|\\', 3); g.text(px - 1, g.h - 2, '/ \\', 3);
+  }
+  function scAlone(g, t, lt) { if (Math.floor(lt * 3) % 2 === 0) g.put(g.w / 2, g.h / 2, '_', 1); g.put(g.w / 2 - 2, g.h / 2, '.', 5); }
+
+  // ───────── 1:58 bridge — cleanup, sudo, error ─────────
+  function scCleanup(g, t, lt) {
+    const kill = clamp(lt / 6.5, 0, .97);
+    for (let y = 0; y < g.h; y++) {
+      const row = tokRows[(y + 7) % tokRows.length];
+      for (let x = 0; x < g.w; x++) {
+        const h = hash(x * 13 + y * 71);
+        if (h < kill) { const fall = (lt - h * 6.5) * 9; if (fall > 0 && fall < 4) g.put(x, y + fall, row[x], 4); continue; }
+        g.put(x, y, row[x], h < kill + .05 ? 4 : 0);
+      }
+    }
+    g.text(2, g.h - 2, ` freed ${(kill * 100).toFixed(0)}% `, 2);
+  }
+  function scError(g, t, lt) {
+    const n = Math.min(9, Math.floor(lt / .22) + 1);
+    for (let i = 0; i < n; i++) {
+      const x = 4 + i * 4, y = 2 + i * 2;
+      box(g, x, y, 40, 7, i === n - 1 ? 4 : 0, true);
+      g.text(x + 2, y + 1, 'x  Error', i === n - 1 ? 4 : 0);
+      g.text(x + 2, y + 3, 'IllegalArgumentException', i === n - 1 ? 5 : 0);
+      g.text(x + 28, y + 5, '[ OK ]', i === n - 1 ? 2 : 0);
+    }
+  }
+
+  // ───────── 2:27 execute ×12, count, whiteout ─────────
+  const MONTAGE = [scBoard, sceneStars, scCircle, scCurrent, sceneWorld, scStill('cat'), scClock, scTrance, scVibrate, scCleanup, sceneMandel, sceneTunnel];
+  function scExec(g, t, lt, pulse, beatN, e) {
+    const k = Math.max(0, hitIndex(t, EXEC));
+    MONTAGE[k % MONTAGE.length](g, t, 3 + (t - EXEC[k]), pulse, beatN, e);
+    g.text(g.w - 16, g.h - 2, ` execute #${String(k + 1).padStart(2, '0')} `, 4);
+  }
+  function scCount(g, t, lt) {
+    const k = hitIndex(t, COUNT);
+    const h = t - COUNT[Math.max(0, k)];
+    for (let a = 0; a < 6.283; a += .05) { const r = h * 40; g.put(g.w / 2 + Math.cos(a) * r * 2, g.h / 2 + Math.sin(a) * r, '*', 3); }
+    if (k >= 0) bigDigit(g, k + 1, g.w / 2, g.h / 2, 6, 3, 5);
+  }
+  function scWhite(g, t, lt) { const f = clamp(1 - lt / 1, 0, 1); for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) if (hash(x + y * 97) < f) g.put(x, y, '#', 5); }
+
+  // ───────── 2:42 retry ─────────
+  function scRetry(g, t, lt, pulse, beatN, e) {
+    sceneOverflow(g, t, lt + 6);
+    if (lt > 11) cage(g, clamp((lt - 11) / 1.2, 0, 1), 4);
+  }
+
+  // ───────── 2:57 learning, quiz, heart, free ─────────
+  function scStudy(g, t, lt) {
+    const P = plotter(g, 0, 100, 0, 1.1); axes(g, { X: () => 2, Y: () => g.h - 3 });
+    const ep = Math.min(100, lt * 30);
+    for (let c = 3; c < g.w; c++) { const x = P.x(c); if (x > ep) break; const y = Math.exp(-x / 18) + .04 * Math.sin(x * 2.3) * Math.exp(-x / 40) + .02; g.put(c, P.Y(y) * .85 + 1, '*', 3); }
+    g.text(g.w - 26, 2, `epoch ${String(Math.floor(ep)).padStart(3, '0')}  loss ${(Math.exp(-ep / 18) + .02).toFixed(4)}`, 2);
+  }
+  const QA = [['2 + 2', '4'], ['d/dx sin x', 'cos x'], ['e^(iπ) + 1', '0'], ['sum 1/2^n', '1'], ['cats > dogs?', 'undefined'], ['sqrt(-1)', 'i'], ['0.1 + 0.2', '0.30000000000000004'], ['P = NP ?', '(thinking)']];
+  function scQuiz(g, t, lt) {
+    const n = Math.min(QA.length, Math.floor(lt / .4) + 1);
+    for (let i = 0; i < n; i++) { const [q, a] = QA[i]; g.text(4, 2 + i * 3, `Q> ${q}`, 1); g.text(8, 3 + i * 3, `A> ${a}  ✓`, i === n - 1 ? 5 : 3); }
+    g.text(g.w - 16, 2, `score ${n}/${n}`, 2);
+  }
+  function scHeart(g, t, lt, pulse) {
+    const reveal = clamp(lt / 2.2, 0, 1), s = 1 + .06 * pulse;
+    for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) {
+      const X = (x - g.w / 2) / (g.h * .8) * 1.5 / s, Y = -(y - g.h * .48) / (g.h * .4) * 1.35 / s;
+      const f = (X * X + Y * Y - 1) ** 3 - X * X * Y ** 3;
+      if (y / g.h > reveal) continue;
+      if (Math.abs(f) < .02) g.put(x, y, '@', 5);
+      else if (f < 0) g.put(x, y, RAMP[clamp(Math.floor(-f * 30), 1, 9)], 4);
+    }
+    g.text(2, g.h - 2, '(x² + y² − 1)³ − x²y³ = 0', 2);
+  }
+  function scFree(g, t, lt, pulse) {
+    scHeart(g, t, 10, pulse); cage(g, 1, 0);
+    const px = g.w * .5 + lt * 9; g.text(px, g.h - 4, 'o', 3); g.text(px - 1, g.h - 3, '/|\\', 3); g.text(px - 1, g.h - 2, '/ \\', 3);
+  }
+  function scFinal(g, t, lt) {
+    if (lt < .6) return scWhite(g, t, lt * 1.6);
+    sphere(g, t, { cx: g.w / 2, cy: g.h / 2, R: g.h * .2, rot: lt * .2, lights: clamp(1 - lt / 3.5, .05, 1) });
+  }
+
   const SCENES = [
-    [0, sceneBoot, 'boot'], [16, sceneStars, 'tokens'], [30, sceneWorld, 'world'], [60, sceneSea, 'sea'],
-    [74, sceneAttention, 'attention'], [88, sceneNet, 'network'], [100, sceneTorus, 'warmth'], [116, sceneMandel, 'recursion'],
-    [131, sceneTunnel, 'deeper'], [148, sceneOverflow, 'overflow'], [170, sceneReplay, 'replay'], [191, sceneCompact, 'compact'],
-    [210, sceneCredits, 'credits'],
+    [0, scPower, 'power'], [2.92, scShield, 'sandbox'], [3.87, scBoard, 'board'], [6.38, scObjects, 'objects'],
+    [10.09, scInit, 'init'], [13.89, scRun, 'run'], [16.0, sceneStars, 'execute'],
+    [29.71, scPoints, 'points'], [33.41, scCircle, 'circle'], [37.07, scSine, 'sine'], [40.71, scLimit, 'limit'],
+    [44.45, scCurrent, 'current'], [47.67, scDizzy, 'dizzy'], [51.36, scTimeline, 'timeline'], [55.08, scUnite, 'merge'],
+    [59.22, scChorus, 'render'], [74.04, scStill('eggplant'), 'eggplant'], [77.58, scStill('tomato'), 'tomato'],
+    [81.35, scStill('cat'), 'cat'], [85.08, (g, ...a) => scEye(g, ...a, false), 'observer'],
+    [88.59, scSwitch, 'switch'], [91.95, scClock, 'clock'], [95.47, scRoles, 'swap'], [99.35, scTrance, 'trance'],
+    [103.49, scVibrate, 'vibrate'], [107.22, scComplete, 'complete'], [110.90, scLeaving, 'left'], [117.27, scAlone, 'alone'],
+    [118.33, scCleanup, 'cleanup'], [125.71, (g, ...a) => scEye(g, ...a, true), 'sudo'], [128.66, scError, 'error'],
+    [131.22, sceneMandel, 'recursion'], [139.4, sceneTunnel, 'deeper'],
+    [147.66, scExec, 'execute'], [158.90, scCount, 'count'], [161.58, scWhite, 'flash'],
+    [162.63, scRetry, 'retry'], [177.25, scStudy, 'train'], [180.86, scQuiz, 'quiz'], [184.54, scHeart, 'heart'], [188.48, scFree, 'door'],
+    [191.4, sceneCompact, 'compact'], [205.81, scFinal, 'return'], [209.5, sceneCredits, 'credits'],
   ];
 
   function frame(g, t, bpm) {
@@ -553,24 +905,25 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
     const inner = new Grid(g.w - 2, g.h - 2);
     fn(inner, t, lt, pulse, beatN, e);
     // blit with a short glitch at every scene cut
-    const cut = lt < .35, fr = Math.floor(t * 30);
+    const cut = lt < .18, fr = Math.floor(t * 30);
     for (let y = 0; y < inner.h; y++) for (let x = 0; x < inner.w; x++) {
       const i = y * inner.w + x;
-      if (cut && hash(i + fr * 7) < .35) g.put(x + 1, y + 1, RAMP[Math.floor(hash(i * 3 + fr) * 10)], 4);
+      if (cut && hash(i + fr * 7) < .3) g.put(x + 1, y + 1, RAMP[Math.floor(hash(i * 3 + fr) * 10)], 4);
       else g.put(x + 1, y + 1, inner.ch[i], inner.co[i]);
     }
     // frame chrome
     for (let x = 1; x < g.w - 1; x++) { g.put(x, 0, '─', 0); g.put(x, g.h - 1, '─', 0); }
     for (let y = 1; y < g.h - 1; y++) { g.put(0, y, '│', 0); g.put(g.w - 1, y, '│', 0); }
     g.put(0, 0, '┌', 0); g.put(g.w - 1, 0, '┐', 0); g.put(0, g.h - 1, '└', 0); g.put(g.w - 1, g.h - 1, '┘', 0);
-    g.text(2, 0, ` viewport · ${String(si + 1).padStart(2, '0')} ${name} `, 2);
+    g.text(2, 0, ` viewport · ${String(si + 1).padStart(2, '0')}/${SCENES.length} ${name} `, 2);
     const right = ` t=${t.toFixed(1).padStart(5, '0')}s  beat ${pulse > .5 ? '●' : '○'} `;
     g.text(g.w - right.length - 2, 0, right, pulse > .5 ? 5 : 0);
     const vu = '|'.repeat(Math.round(e * 8)).padEnd(8, '.');
     g.text(2, g.h - 1, ` ${bpm} bpm · ${vu} · ${COLS}x${g.h} `, 0);
-    // downbeat flash in the loud parts; every beat during the replay montage
-    const flash = t > 16 && t < 206 && ((e >= .85 && (t % BAR) < .07) || (name === 'replay' && pulse > .85));
-    const shake = (name === 'overflow' && lt > 2 && lt < 15) || (name === 'replay' && pulse > .8);
+    // flash on accent hits (from the timing map, or from the viewer's .lrc when loaded)
+    const hit = Math.min(sinceHit(t), cueHitAge(t));
+    const flash = t < 209 && hit < .07;
+    const shake = t < 209 && hit < .22 && e > .6;
     return { flash, shake };
   }
 
@@ -606,19 +959,32 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
     $('tok').textContent = `${Math.round(pct * 2000).toLocaleString('en-US')} tokens`;
   }
 
-  // ───────── overlay ─────────
-  let lastOv = null;
+  // ───────── overlay: section cards, or the viewer's own emphasised lyric words ─────────
+  let lastOv = '';
+  function activeBigCue(t) {
+    for (let i = cues.length - 1; i >= 0; i--) {
+      const c = cues[i]; if (c.t > t) continue;
+      const until = Math.min(c.t + 1.6, cues[i + 1] ? cues[i + 1].t : c.t + 1.6);
+      return c.big && t < until ? { ...c, end: until } : null;
+    }
+    return null;
+  }
   function renderOverlay(t) {
-    const o = OVERLAYS.find(o => t >= o.at && t < o.at + o.dur) || null;
-    if (o !== lastOv) {
-      $('overlay').innerHTML = o ? `<span>${esc(o.text)}<small>${esc(o.sub)}</small></span>` : '';
-      lastOv = o;
+    const big = activeBigCue(t);
+    const o = big ? { at: big.t, dur: big.end - big.t, text: big.a, sub: big.b, big: true }
+      : OVERLAYS.find(o => t >= o.at && t < o.at + o.dur && (o.keep || !cues.length)) || null;
+    const key = o ? o.at + o.text : '';
+    if (key !== lastOv) {
+      $('overlay').innerHTML = o ? `<span${o.big ? ' class="big"' : ''}>${esc(o.text)}<small>${esc(o.sub)}</small></span>` : '';
+      lastOv = key;
     }
     const span = $('overlay').firstElementChild;
     if (span) {
-      const lt = t - o.at, a = o.dur > 50 ? clamp(lt / .8, 0, 1) : clamp(Math.min(lt / .15, (o.at + o.dur - t) / .3), 0, 1);
+      const lt = t - o.at, a = o.dur > 50 ? clamp(lt / .8, 0, 1) : clamp(Math.min(lt / .08, (o.at + o.dur - t) / .25), 0, 1);
+      const punch = o.big ? 1 + .35 * Math.exp(-lt * 12) : 1;
+      const jitter = hash(Math.floor(t * 20)) < .12 && o.dur < 50 ? (hash(t) - .5) * 3 : 0;
       span.style.opacity = a;
-      span.style.transform = `translateX(${hash(Math.floor(t * 20)) < .12 && o.dur < 50 ? (hash(t) - .5) * 3 : 0}cqw)`;
+      span.style.transform = `translateX(${jitter}cqw) scale(${punch})`;
     }
   }
 
@@ -682,7 +1048,7 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
       let [a = '', b = ''] = ls;
       if (!b && a.includes(' / ')) [a, b] = a.split(' / ');   // single-line "original / translation" form
       if (hasCjk(a) && b && !hasCjk(b)) [a, b] = [b, a];   // original on top, translation below
-      return { t, a, b };
+      return { t, a, b, big: /[A-Z]{2,}/.test(a) && !/[a-z]/.test(a) };   // all-caps lines are the shouted words
     });
   }
   async function loadLrc(blob, name) {
@@ -697,11 +1063,19 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
   function renderSubs(t) {
     let cue = null;
     for (const c of cues) { if (c.t > t) break; cue = c; }
-    if (cue && t - cue.t > 6) cue = null;   // clear during instrumental gaps and after the last line
-    if (cue === lastCue) return;
-    lastCue = cue;
-    $('subA').textContent = cue ? cue.a : '';
-    $('subB').textContent = cue ? cue.b : '';
+    if (cue && (cue.big || t - cue.t > 6)) cue = null;   // shouted words go to the overlay; clear during long gaps
+    const n = cue ? Math.min(cue.a.length, Math.floor((t - cue.t) * 45) + 1) : 0;   // type the line out
+    const key = cue ? cue.t + ':' + n : '';
+    if (key === lastCue) return;
+    lastCue = key;
+    $('subA').textContent = cue ? cue.a.slice(0, n) : '';
+    $('subB').textContent = cue && n >= cue.a.length ? cue.b : '';
+  }
+  // seconds since the last shouted lyric word, so the viewport can hit on it
+  function cueHitAge(t) {
+    let d = 99;
+    for (const c of cues) { if (c.t > t) break; if (c.big) d = t - c.t; }
+    return d;
   }
 
   function loadFiles(files) {
@@ -734,7 +1108,7 @@ body { font-family: var(--f-body); padding-inline: 16px; padding-block: 20px 32p
   const chapWrap = $('chapters');
   const chapBtns = CHAPTERS.map(([name, at]) => {
     const b = document.createElement('button');
-    b.textContent = `${String(Math.floor(at / 60))}:${String(at % 60).padStart(2, '0')} ${name}`;
+    b.textContent = `${Math.floor(at / 60)}:${String(Math.floor(at % 60)).padStart(2, '0')} ${name}`;
     b.onclick = () => { seek(at); if (!playing) setPlaying(true); };
     chapWrap.appendChild(b); return b;
   });
